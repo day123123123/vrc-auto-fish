@@ -609,6 +609,7 @@ class ImageDetector:
         else:
             h_fish = h_ch[mask]
             red_count = int(np.sum((h_fish < 12) | (h_fish > 165)))
+            h_dom = -1
             if red_count > n_sat * 0.35:
                 result = "fish_red"
             else:

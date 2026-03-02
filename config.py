@@ -5,14 +5,19 @@
 """
 
 import os
+import sys
 
 # ═══════════════════════════════════════════════════════════
 #  路径
 # ═══════════════════════════════════════════════════════════
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = sys._MEIPASS
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 IMG_DIR = os.path.join(BASE_DIR, "img")
-DEBUG_DIR = os.path.join(BASE_DIR, "debug")
-SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
+_APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else BASE_DIR
+DEBUG_DIR = os.path.join(_APP_DIR, "debug")
+SETTINGS_FILE = os.path.join(_APP_DIR, "settings.json")
 
 # ═══════════════════════════════════════════════════════════
 #  VRChat 窗口

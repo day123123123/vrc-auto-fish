@@ -415,6 +415,11 @@ class FishingApp:
         try:
             with open(config.SETTINGS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if data.get("HOLD_GAIN", 1) < 0.02:
+                data["HOLD_GAIN"] = 0.040
+            if data.get("SPEED_DAMPING", 0) > 0.001:
+                data["SPEED_DAMPING"] = 0.00025
+
             loaded = []
             for attr, val in data.items():
                 if attr == "USE_OSC":
