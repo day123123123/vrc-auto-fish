@@ -44,6 +44,7 @@ TUNABLE_PARAMS = [
     ("归正时间(s)",   "POST_CATCH_DELAY", "float", "钓鱼结束/失败后等待N秒再抛竿"),
     ("摇头时长(s)",   "SHAKE_HEAD_TIME",  "float", "摇头每段按住时长,0=不摇头"),
     ("按压时间(s)",   "INITIAL_PRESS_TIME","float", "开局按压时长(开局延迟0.5s固定)"),
+    ("确认帧数",      "VERIFY_CONSECUTIVE","int",   "连续几帧检测到UI才确认小游戏开始"),
 ]
 
 
@@ -369,6 +370,7 @@ class FishingApp:
             "POST_CATCH_DELAY": 3.0,
             "SHAKE_HEAD_TIME":  0.01,
             "INITIAL_PRESS_TIME": 0.2,
+            "VERIFY_CONSECUTIVE": 2,
         }
 
         for attr, default_val in defaults.items():
