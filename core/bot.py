@@ -1088,6 +1088,9 @@ class FishingBot:
                 log.info("[🎣 收杆] 录制模式 — 请手动收杆")
             else:
                 self.input.safe_release()
+                # 安全间隔: 防止 PD 控制器最后一次 mouse_down 在游戏结束
+                # 瞬间变成意外点击（导致误下饵）
+                time.sleep(0.5)
                 if success:
                     time.sleep(0.2)
                     self.input.click()
