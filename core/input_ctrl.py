@@ -58,7 +58,7 @@ class InputController:
         try:
             from pythonosc import udp_client
             self._osc_client = udp_client.SimpleUDPClient("127.0.0.1", 9000)
-            self._osc_client.send_message("/input/UseLeft", 0)
+            self._osc_client.send_message("/input/UseRight", 0)
             self._use_osc = True
             log.info("[输入] OSC 模式已启用 (→ 127.0.0.1:9000)")
         except ImportError:
@@ -69,7 +69,7 @@ class InputController:
     def _osc_send(self, value: int):
         if self._osc_client:
             try:
-                self._osc_client.send_message("/input/UseLeft", value)
+                self._osc_client.send_message("/input/UseRight", value)
             except Exception:
                 pass
 
@@ -115,7 +115,7 @@ class InputController:
     def click(self, focus: bool = False):
         """鼠标左键单击"""
         if self._use_osc:
-            log.info(f"[输入] click(OSC): UseLeft 1→0")
+            log.info(f"[输入] click(OSC): UseRight 1→0")
             self._osc_send(1)
             time.sleep(0.12)
             self._osc_send(0)
