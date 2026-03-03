@@ -4,7 +4,7 @@
 支持两种输入模式:
 
 1. PostMessage (默认) — Win32 消息投递, 不移动光标不抢焦点
-2. OSC — 通过 VRChat OSC API 发送 /input/UseLeft, 更稳定且不占用鼠标
+2. OSC — 通过 VRChat OSC API 发送 /input/UseRight, 更稳定且不占用鼠标
 
 通过 use_osc 参数切换。
 """
@@ -38,7 +38,7 @@ class InputController:
     鼠标输入控制器 — 支持 PostMessage / OSC 双模式
 
     PostMessage: 基于 Win32 窗口消息, 不移动系统光标
-    OSC:         通过 VRChat OSC API (/input/UseLeft) 发送, 不占用鼠标
+    OSC:         通过 VRChat OSC API (/input/UseRight) 发送, 不占用鼠标
     """
 
     def __init__(self, window_mgr, use_osc: bool = False):
