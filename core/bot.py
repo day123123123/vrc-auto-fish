@@ -208,11 +208,6 @@ class FishingBot:
 
             time.sleep(0.2)
 
-            if self.input.check_failsafe():
-                log.warning("鼠标在左上角，安全暂停")
-                self.running = False
-                return False
-
         return False
 
     # ══════════════════════════════════════════════════════
@@ -1058,12 +1053,6 @@ class FishingBot:
                         f"[F{frame:04d}] {fi} | {bi} | {vel} | "
                         f"按住:{hold_count} | 进度:{green:.0%}"
                     )
-
-                # ── 安全 ──
-                if self.input.check_failsafe():
-                    log.warning("鼠标在左上角，安全暂停")
-                    self.running = False
-                    break
 
                 time.sleep(config.GAME_LOOP_INTERVAL)
 

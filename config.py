@@ -103,7 +103,7 @@ MAX_FISH_BAR_DIST = 300           # ★ 鱼和白条中心最大合理距离(px)
 REGION_UP         = 300           # 白条锁定后, 向上搜索像素数
 REGION_DOWN       = 400           # 白条锁定后, 向下搜索像素数
 REGION_X          = 100           # 白条锁定后, 左右搜索像素数 (中心±N)
-USE_OSC           = False          # True=OSC输入(不占鼠标), False=PostMessage输入
+USE_OSC           = True           # True=OSC输入(不占鼠标), False=PostMessage输入
 DETECT_ROI        = None           # 玩家框选的检测区域 [x, y, w, h], None=全屏搜索
 
 # ═══════════════════════════════════════════════════════════

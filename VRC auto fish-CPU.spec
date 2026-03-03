@@ -26,7 +26,7 @@ _cuda_keywords = ['cublas', 'cublasLt', 'cudnn', 'cufft', 'cusolver',
                   'cusparse', 'torch_cuda', 'nvrtc', 'c10_cuda',
                   'caffe2_nvrtc', 'nvinfer', 'nvToolsExt', 'nccl',
                   'cudart', 'cupti', 'curand', 'nvJitLink', 'nvjpeg',
-                  'nvperf', 'shm']
+                  'nvperf']
 a.binaries = [b for b in a.binaries
               if not any(k in b[0] for k in _cuda_keywords)]
 
@@ -48,6 +48,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    manifest='admin.manifest',
+    uac_admin=True,
 )
 coll = COLLECT(
     exe,

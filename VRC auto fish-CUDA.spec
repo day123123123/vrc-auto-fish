@@ -39,6 +39,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    manifest='admin.manifest',
+    uac_admin=True,
 )
 coll = COLLECT(
     exe,
