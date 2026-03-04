@@ -93,6 +93,9 @@ class FishingBot:
         self._track_angle   = 0.0        # 轨道偏转角度 (度)
         self._need_rotation = False      # 是否需要旋转补偿
 
+        # ── 自动 ROI (未手动框选时, 从验证阶段自动推断) ──
+        self._auto_roi = None
+
         # ── 鱼/白条位置平滑 (减少检测抖动) ──
         self._fish_smooth_cy = None      # 平滑后的鱼中心 Y
         self._current_fish_name = ""     # 当前检测到的鱼模板名 (如 "fish_blue")
@@ -171,10 +174,15 @@ class FishingBot:
         if config.IL_RECORD:
             log.info("[🎣 抛竿] 录制模式 — 请手动抛竿 (点击鼠标)")
         else:
-            log.info("[🎣 抛竿] 摇头 → 抛竿...")
-            self.input.shake_head()
-            time.sleep(0.15)
             self.input.click()
+            time.sleep(0.15)
+            mode = getattr(config, "ANTI_STUCK_MODE", "shake")
+            if mode == "jump":
+                log.info("[🎣 抛竿] 抛竿 → 跳跃防卡杆")
+                self.input.jump_toggle()
+            else:
+                log.info("[🎣 抛竿] 抛竿 → 摇头防卡杆")
+                self.input.shake_head()
         # ★ 从抛竿开始就显示 debug 窗口
         try:
             screen = self._grab()
@@ -187,39 +195,61 @@ class FishingBot:
     #  第2步: 等待咬钩
     # ══════════════════════════════════════════════════════
 
-    def _wait_for_bite(self) -> bool:
-        self.state = "等待咬钩"
-        if config.IL_RECORD:
-            wait_s = config.MINIGAME_TIMEOUT
-            log.info(f"[⏳ 等待] 录制模式 — 请手动操作, 等待小游戏出现 (最长{wait_s:.0f}s)...")
-        else:
-            wait_s = config.BITE_FORCE_HOOK
-            log.info(f"[⏳ 等待] 等待 {wait_s:.0f}s 后自动提竿...")
+    def _detect_ui_once(self, screen, return_bbox=False):
+        """单帧检测: 白条+轨道是否同时出现（YOLO优先，模板兜底）。
+        return_bbox=True 时返回 (found, (min_x, min_y, max_x, max_y))"""
+        _roi = config.DETECT_ROI
+        _use_yolo = config.USE_YOLO and self.yolo is not None
+        bbox = None
 
-        t0 = time.time()
-        while self.running:
-            elapsed = time.time() - t0
-            if elapsed >= wait_s:
-                log.info(f"[🪝 提竿] 等待 {elapsed:.1f}s 完毕, 自动提竿")
-                return True
-
-            # debug 窗口
+        if _use_yolo:
             try:
-                screen = self._grab()
-                self._show_debug_overlay(
-                    screen,
-                    status_text=f"⏳ 等待提竿 ({elapsed:.0f}/{wait_s:.0f}s)"
-                )
+                det = self.yolo.detect(screen, _roi)
+                if det.get("bar") and det.get("track"):
+                    yb, yt = det["bar"], det["track"]
+                    if abs((yb[0]+yb[2]//2) - (yt[0]+yt[2]//2)) < 150:
+                        if return_bbox:
+                            bbox = (min(yb[0], yt[0]), min(yb[1], yt[1]),
+                                    max(yb[0]+yb[2], yt[0]+yt[2]),
+                                    max(yb[1]+yb[3], yt[1]+yt[3]))
+                            return True, bbox
+                        return True
             except Exception:
                 pass
 
-            time.sleep(0.2)
-
+        bar = self.detector.find_multiscale(
+            screen, "bar", config.THRESH_BAR,
+            scales=config.BAR_SCALES, search_region=_roi)
+        track = self.detector.find_multiscale(
+            screen, "track", config.THRESH_TRACK, search_region=_roi)
+        if bar and track:
+            bar_cx = bar[0] + bar[2] // 2
+            track_cx = track[0] + track[2] // 2
+            if abs(bar_cx - track_cx) < 150:
+                if return_bbox:
+                    bbox = (min(bar[0], track[0]), min(bar[1], track[1]),
+                            max(bar[0]+bar[2], track[0]+track[2]),
+                            max(bar[1]+bar[3], track[1]+track[3]))
+                    return True, bbox
+                return True
+        if return_bbox:
+            return False, None
         return False
 
-    # ══════════════════════════════════════════════════════
-    #  第3步: 提竿
-    # ══════════════════════════════════════════════════════
+    def _verify_game_alive(self) -> bool:
+        """快速检查小游戏UI是否仍然存在 (5帧, 无延迟)。
+        用于游戏结束条件触发后的二次确认。"""
+        for i in range(5):
+            if not self.running:
+                return False
+            screen = self._grab()
+            self._show_debug_overlay(
+                screen,
+                status_text=f"🔍 验证小游戏 ({i+1}/5)")
+            if self._detect_ui_once(screen):
+                return True
+            time.sleep(0.03)
+        return False
 
     def _hook_fish(self):
         self.state = "提竿"
@@ -245,91 +275,68 @@ class FishingBot:
         """
         提竿后验证钓鱼小游戏 UI 是否真的出现了。
 
-        改为 **累计** N 帧检测到 UI 即确认（不要求严格连续），
-        同时优先使用 YOLO（若可用），模板匹配作为兜底。
+        延迟 0.5s 等待 UI 渲染，然后用十多帧(~15帧)快速确认。
+        累计 N 帧检测到即确认，优先 YOLO，模板兜底。
+        确认后自动计算动态 ROI (仅在未手动框选时生效)。
         """
         self.state = "验证小游戏"
-        log.info("[🔍 验证] 快速检测小游戏UI...")
+
+        time.sleep(0.5)
+        log.info("[🔍 验证] 延迟0.5s后开始检测小游戏UI...")
 
         t0 = time.time()
         hit_count = 0
         required = config.VERIFY_CONSECUTIVE
-        _use_yolo = config.USE_YOLO and self.yolo is not None
+        total_frames = 0
+        max_frames = 15
 
-        # 重置旋转状态
         self._track_angle = 0.0
         self._need_rotation = False
-        detected_angle = None
+        self._auto_roi = None
+        last_bbox = None
 
-        while self.running and (time.time() - t0 < config.VERIFY_TIMEOUT):
+        while self.running and total_frames < max_frames and (time.time() - t0 < config.VERIFY_TIMEOUT):
             screen = self._grab()
-            found = False
+            total_frames += 1
 
             self._show_debug_overlay(
                 screen,
-                status_text=f"🔍 验证UI ({hit_count}/{required})"
+                status_text=f"🔍 验证UI ({hit_count}/{required}) 帧{total_frames}/{max_frames}"
             )
 
-            _roi = config.DETECT_ROI
-
-            # ── 优先 YOLO 检测 ──
-            if _use_yolo:
-                try:
-                    det = self.yolo.detect(screen, _roi)
-                    if det.get("bar") and det.get("track"):
-                        yb = det["bar"]
-                        yt = det["track"]
-                        bar_cx = yb[0] + yb[2] // 2
-                        track_cx = yt[0] + yt[2] // 2
-                        if abs(bar_cx - track_cx) < 150:
-                            found = True
-                            detected_angle = 0.0
-                except Exception:
-                    pass
-
-            # ── 模板匹配兜底 ──
-            if not found:
-                bar = self.detector.find_multiscale(
-                    screen, "bar", config.THRESH_BAR,
-                    scales=config.BAR_SCALES,
-                    search_region=_roi,
-                )
-                track = self.detector.find_multiscale(
-                    screen, "track", config.THRESH_TRACK,
-                    search_region=_roi,
-                )
-
-                bar_cx = (bar[0] + bar[2] // 2) if bar else None
-                track_cx = (track[0] + track[2] // 2) if track else None
-
-                if bar_cx is not None and track_cx is not None:
-                    if abs(bar_cx - track_cx) < 150:
-                        found = True
-                        detected_angle = 0.0
+            found, bbox = self._detect_ui_once(screen, return_bbox=True)
+            if bbox is not None:
+                last_bbox = bbox
 
             if found:
                 hit_count += 1
                 if hit_count >= required:
-                    if detected_angle is not None:
-                        self._track_angle = detected_angle
-                        angle_abs = abs(self._track_angle)
-                        self._need_rotation = (
-                            angle_abs > config.TRACK_MIN_ANGLE
-                            and angle_abs <= config.TRACK_MAX_ANGLE
-                        )
-                    log.info(
-                        f"[✓ 确认] 检测到UI! "
-                        f"(耗时 {time.time()-t0:.1f}s"
-                        f", 角度={self._track_angle:.1f}°)"
-                    )
+                    self._track_angle = 0.0
+
+                    if last_bbox is not None and config.DETECT_ROI is None:
+                        min_x, min_y, max_x, max_y = last_bbox
+                        h_scr, w_scr = screen.shape[:2]
+                        pad_x, pad_y = 120, 150
+                        rx = max(0, min_x - pad_x)
+                        ry = max(0, min_y - pad_y)
+                        rw = min(w_scr - rx, (max_x - min_x) + pad_x * 2)
+                        rh = min(h_scr - ry, (max_y - min_y) + pad_y * 2)
+                        self._auto_roi = (rx, ry, rw, rh)
+                        log.info(
+                            f"[✓ 确认] 检测到UI! "
+                            f"(耗时 {time.time()-t0:.1f}s, {total_frames}帧) "
+                            f"自动ROI: X={rx} Y={ry} {rw}x{rh}")
+                    else:
+                        log.info(
+                            f"[✓ 确认] 检测到UI! "
+                            f"(耗时 {time.time()-t0:.1f}s, {total_frames}帧)")
                     return True
 
             time.sleep(0.03)
 
         log.warning(
-            f"[✗ 误触] {config.VERIFY_TIMEOUT:.1f}s 内未确认小游戏UI "
-            f"(累计命中: {hit_count}/{required})，将重新抛竿"
-        )
+            f"[✗ 误触] {total_frames}帧内未确认小游戏UI "
+            f"(累计命中: {hit_count}/{required})，将重新抛竿")
         return False
 
     def _wait_for_minigame_ui(self) -> bool:
@@ -387,8 +394,7 @@ class FishingBot:
     # ══════════════════════════════════════════════════════
 
     def _fishing_minigame(self) -> bool:
-        self.state = "小游戏进行中"
-        log.info("[🐟 钓鱼] 小游戏开始")
+        """返回 True=成功, False=失败/停止, None=验证失败需重试"""
 
         # ── 行为克隆: 每局重置状态 ──
         self._il_history.clear()
@@ -397,6 +403,51 @@ class FishingBot:
         self._il_press_streak = 0
         self._il_prev_velocity = 0.0
         self._il_log_counter = 0
+
+        # ★ YOLO 模式 (延迟加载: 首次使用时加载)
+        if config.USE_YOLO and self.yolo is None:
+            try:
+                self.yolo = _get_yolo_detector()
+            except Exception as e:
+                log.warning(f"[YOLO] 加载失败: {e}，回退到模板匹配")
+        _use_yolo = config.USE_YOLO and self.yolo is not None
+
+        # ═══════ Phase 1: 等待期间运行 YOLO 检测 (不控制) ═══════
+        if not config.IL_RECORD:
+            wait_s = config.BITE_FORCE_HOOK
+            log.info(f"[⏳ 等待] 等待 {wait_s:.0f}s 后提竿, 同时运行检测...")
+            _wait_t0 = time.time()
+            while self.running:
+                _wait_elapsed = time.time() - _wait_t0
+                if _wait_elapsed >= wait_s:
+                    log.info(f"[🪝 提竿] 等待 {_wait_elapsed:.1f}s 完毕, 自动提竿")
+                    break
+                try:
+                    _wait_screen = self._grab()
+                    _pre_fish, _pre_bar = None, None
+                    if _use_yolo:
+                        _yd = self.yolo.detect(
+                            _wait_screen,
+                            roi=config.DETECT_ROI or self._auto_roi)
+                        _pre_fish = _yd.get("fish")
+                        _pre_bar = _yd.get("bar")
+                    self._show_debug_overlay(
+                        _wait_screen, _pre_fish, _pre_bar,
+                        status_text=f"⏳ 等待提竿 ({_wait_elapsed:.0f}/{wait_s:.0f}s)")
+                except Exception:
+                    pass
+                time.sleep(0.2)
+
+            if not self.running:
+                return False
+
+            self._hook_fish()
+            if not self.running:
+                return False
+
+        # ═══════ Phase 2: 小游戏正式开始 ═══════
+        self.state = "小游戏进行中"
+        log.info("[🐟 钓鱼] 小游戏开始")
 
         if config.IL_RECORD:
             self._il_start_recording()
@@ -411,13 +462,6 @@ class FishingBot:
         else:
             log.info("[PD] 本局使用 PD 控制器")
 
-        # ★ YOLO 模式 (延迟加载: 首次使用时加载)
-        if config.USE_YOLO and self.yolo is None:
-            try:
-                self.yolo = _get_yolo_detector()
-            except Exception as e:
-                log.warning(f"[YOLO] 加载失败: {e}，回退到模板匹配")
-        _use_yolo = config.USE_YOLO and self.yolo is not None
         if _use_yolo:
             log.info("[YOLO] 使用 YOLO 目标检测")
 
@@ -489,9 +533,15 @@ class FishingBot:
             _regions_locked = True
             if config.DETECT_ROI:
                 log.info(
-                    f"  [YOLO] 使用 ROI: "
+                    f"  [YOLO] 使用手动 ROI: "
                     f"X={config.DETECT_ROI[0]} Y={config.DETECT_ROI[1]} "
                     f"{config.DETECT_ROI[2]}x{config.DETECT_ROI[3]}"
+                )
+            elif self._auto_roi:
+                log.info(
+                    f"  [YOLO] 使用自动 ROI: "
+                    f"X={self._auto_roi[0]} Y={self._auto_roi[1]} "
+                    f"{self._auto_roi[2]}x{self._auto_roi[3]}"
                 )
             else:
                 log.info("  [YOLO] 全屏检测")
@@ -516,16 +566,10 @@ class FishingBot:
                     f"Y={bsy}~{bsy+bsh} (下半屏)"
                 )
 
-        # ★ 开局稳定按压: 白条会从中间快速坠落，两次按压恢复惯性
-        if config.IL_RECORD:
-            log.info("  ► 录制模式 — 跳过开局按压, 请手动控制")
-        else:
-            press_t = getattr(config, 'INITIAL_PRESS_TIME', 0.2)
-            log.info(f"  ► 开局延迟0.5s + 按压{press_t}s")
-            time.sleep(0.5)
-            self.input.mouse_down()
-            time.sleep(press_t)
-            self.input.mouse_up()
+        _game_active = False
+        _hook_time = time.time()
+        _HOOK_DETECT_TIMEOUT = 1.5
+        _hook_timeout_retry = False
 
         _last_progress_sr = None
         _last_track_w = None
@@ -561,7 +605,7 @@ class FishingBot:
                 # ════════════ 定期检查 UI 是否还存在 ════════════
                 if frame % config.UI_CHECK_FRAMES == 0 and frame > 10:
                     if _use_yolo:
-                        _tc = self.yolo.detect(screen, config.DETECT_ROI)
+                        _tc = self.yolo.detect(screen, config.DETECT_ROI or self._auto_roi)
                         track_check = _tc["track"]
                     else:
                         track_check = self.detector.find_multiscale(
@@ -601,11 +645,18 @@ class FishingBot:
                         if no_detect > 5:
                             self.input.mouse_up()
                         if no_detect > config.TRACK_LOST_LIMIT:
-                            log.info(
-                                f"[📋 结束] 连续{no_detect}帧未检测到"
-                                f"有效UI，游戏已结束"
-                            )
-                            break
+                            if _game_active and self._verify_game_alive():
+                                log.info(f"[✓ 恢复] 连续{no_detect}帧丢失, 但验证UI仍在")
+                                no_detect = 0
+                                fish_lost = 0
+                                fish_gone_since = None
+                                bar_gone_since = None
+                                obj_gone_count = 0
+                            else:
+                                log.info(
+                                    f"[📋 结束] 连续{no_detect}帧未检测到"
+                                    f"有效UI，验证确认游戏已结束")
+                                break
                         # ★ debug 窗口仍然刷新
                         self._show_debug_overlay(
                             screen_raw,
@@ -624,7 +675,7 @@ class FishingBot:
                 _yolo_progress = None
                 if _use_yolo:
                     # ──── YOLO: 一次推理检测全部 ────
-                    _yolo_roi = config.DETECT_ROI
+                    _yolo_roi = config.DETECT_ROI or self._auto_roi
                     _ydet = self.yolo.detect(screen, roi=_yolo_roi)
                     fish = _ydet["fish"]
                     bar = _ydet["bar"]
@@ -864,9 +915,10 @@ class FishingBot:
                 # ════════════ ★ 可视化调试 (每帧都画, 内置节流) ════════════
                 # ★ 用原始画面展示 (不旋转), 更直观
                 # (旋转时坐标略有偏差, 但远好过看旋转画面)
+                _display_sr = search_region or self._auto_roi
                 if not self._need_rotation:
                     self._show_debug_overlay(
-                        screen_raw, fish, bar, search_region,
+                        screen_raw, fish, bar, _display_sr,
                         bar_search_region=bar_search_region,
                         progress=_yolo_progress,
                         status_text=f"🐟 小游戏 F{frame:04d}"
@@ -874,10 +926,32 @@ class FishingBot:
                 else:
                     self._show_debug_overlay(
                         screen_raw,
+                        search_region=_display_sr,
                         bar_search_region=bar_search_region,
                         progress=_yolo_progress,
                         status_text=f"🐟 小游戏 F{frame:04d} (旋转{self._track_angle:.0f}°补偿中)"
                     )
+
+                # ════════════ ★ 首次检测到鱼 → 激活PD控制 ════════════
+                if not _game_active:
+                    if fish is not None:
+                        _game_active = True
+                        had_good_detection = True
+                        log.info("[🐟 开始] 检测到鱼, 小游戏确认! PD控制启动")
+                        if not config.IL_RECORD:
+                            press_t = getattr(config, 'INITIAL_PRESS_TIME', 0.2)
+                            self.input.mouse_down()
+                            time.sleep(press_t)
+                            self.input.mouse_up()
+                    elif time.time() - _hook_time > _HOOK_DETECT_TIMEOUT:
+                        log.warning(
+                            f"[⚠ 超时] 提竿后 {_HOOK_DETECT_TIMEOUT}s 未检测到鱼,"
+                            f" 判定未进入小游戏, 返回主循环重新抛竿")
+                        _hook_timeout_retry = True
+                        break
+                    else:
+                        time.sleep(config.GAME_LOOP_INTERVAL)
+                        continue
 
                 # ════════════ 进度条 (记录进度, 不直接判定结束) ════════════
                 green = 0.0
@@ -952,8 +1026,16 @@ class FishingBot:
                         self.screen.save_debug(screen, "minigame_lost")
 
                     if no_detect > config.TRACK_LOST_LIMIT:
-                        log.info(f"[📋 结束] 连续{no_detect}帧未检测到有效UI，游戏已结束")
-                        break
+                        if self._verify_game_alive():
+                            log.info(f"[✓ 恢复] 连续{no_detect}帧丢失, 但验证UI仍在")
+                            no_detect = 0
+                            fish_lost = 0
+                            fish_gone_since = None
+                            bar_gone_since = None
+                            obj_gone_count = 0
+                        else:
+                            log.info(f"[📋 结束] 连续{no_detect}帧未检测到有效UI，验证确认结束")
+                            break
 
                     time.sleep(config.GAME_LOOP_INTERVAL)
                     continue
@@ -970,8 +1052,14 @@ class FishingBot:
                     if fish_lost == 30:
                         log.warning(f"[⚠ 鱼丢失] 连续{fish_lost}帧未检测到鱼")
                     if had_good_detection and fish_lost > config.FISH_LOST_LIMIT:
-                        log.info(f"[📋 结束] 鱼已消失{fish_lost}帧，游戏可能已结束")
-                        break
+                        if self._verify_game_alive():
+                            log.info(f"[✓ 恢复] 鱼消失{fish_lost}帧, 但验证UI仍在")
+                            fish_lost = 0
+                            fish_gone_since = None
+                            no_detect = 0
+                        else:
+                            log.info(f"[📋 结束] 鱼已消失{fish_lost}帧，验证确认结束")
+                            break
                 else:
                     fish_lost = 0
                     fish_gone_since = None
@@ -989,19 +1077,26 @@ class FishingBot:
                 if (had_good_detection and fish_gone_since is not None
                         and now_t - fish_gone_since > _timeout):
                     elapsed = now_t - fish_gone_since
-                    log.info(
-                        f"[📋 失败] 鱼连续消失 {elapsed:.1f}s "
-                        f"(>{_timeout}s), 游戏结束"
-                    )
-                    break
+                    if self._verify_game_alive():
+                        log.info(f"[✓ 恢复] 鱼消失{elapsed:.1f}s, 但验证UI仍在")
+                        fish_gone_since = None
+                        fish_lost = 0
+                        no_detect = 0
+                    else:
+                        log.info(
+                            f"[📋 失败] 鱼连续消失 {elapsed:.1f}s, 验证确认结束")
+                        break
                 if (had_good_detection and bar_gone_since is not None
                         and now_t - bar_gone_since > _timeout):
                     elapsed = now_t - bar_gone_since
-                    log.info(
-                        f"[📋 失败] 白条连续消失 {elapsed:.1f}s "
-                        f"(>{_timeout}s), 游戏结束"
-                    )
-                    break
+                    if self._verify_game_alive():
+                        log.info(f"[✓ 恢复] 白条消失{elapsed:.1f}s, 但验证UI仍在")
+                        bar_gone_since = None
+                        no_detect = 0
+                    else:
+                        log.info(
+                            f"[📋 失败] 白条连续消失 {elapsed:.1f}s, 验证确认结束")
+                        break
 
                 # 3) ★ 对象不足检测: 鱼/条/轨道 至少2个才继续
                 if obj_count < config.OBJ_MIN_COUNT:
@@ -1016,11 +1111,18 @@ class FishingBot:
                             f"({obj_gone_count}/{config.OBJ_GONE_LIMIT})"
                         )
                     if obj_gone_count >= config.OBJ_GONE_LIMIT:
-                        log.info(
-                            f"[📋 结束] 连续{obj_gone_count}帧仅检测到"
-                            f"{obj_count}个对象，游戏结束!"
-                        )
-                        break
+                        if self._verify_game_alive():
+                            log.info(f"[✓ 恢复] 对象不足{obj_gone_count}帧, 但验证UI仍在")
+                            obj_gone_count = 0
+                            no_detect = 0
+                            fish_lost = 0
+                            fish_gone_since = None
+                            bar_gone_since = None
+                        else:
+                            log.info(
+                                f"[📋 结束] 连续{obj_gone_count}帧对象不足,"
+                                f"验证确认结束")
+                            break
                 else:
                     if obj_gone_count > 3:
                         log.info(
@@ -1064,6 +1166,13 @@ class FishingBot:
                 time.sleep(config.GAME_LOOP_INTERVAL)
 
         finally:
+            if _hook_timeout_retry:
+                self.input.safe_release()
+                time.sleep(0.3)
+                self.input.click()
+                log.info("[🎣 收杆] 点击收杆后返回主循环重新抛竿")
+                return None
+
             if _skip_fish:
                 success = False
                 log.info(
@@ -1086,10 +1195,14 @@ class FishingBot:
                 log.info("[🎣 收杆] 录制模式 — 请手动收杆")
             else:
                 self.input.safe_release()
-                # 安全间隔: 防止 PD 控制器最后一次 mouse_down 在游戏结束
-                # 瞬间变成意外点击（导致误下饵）
                 time.sleep(0.5)
-                if success:
+
+                if getattr(config, "SKIP_SUCCESS_CHECK", False):
+                    time.sleep(0.2)
+                    self.input.click()
+                    log.info("[🎣 收杆] 跳过成功检查, 点击收杆")
+                    success = True
+                elif success:
                     time.sleep(0.2)
                     self.input.click()
                     log.info("[🎣 收杆] 钓鱼成功, 点击收杆")
@@ -1796,30 +1909,15 @@ class FishingBot:
                     if not self.running:
                         break
 
-                    if not self._wait_for_bite():
-                        if self.running:
-                            time.sleep(1.0)
-                        continue
-                    if not self.running:
-                        break
-
-                    self._hook_fish()
-                    if not self.running:
-                        break
-
-                    # ★ 验证小游戏是否真的出现了
-                    if not self._verify_minigame():
-                        wait = config.POST_CATCH_DELAY
-                        log.info(f"[🔄 重试] 未检测到小游戏, 收杆后等待{wait:.1f}s重新抛竿")
-                        self.input.click()
-                        time.sleep(wait)
-                        log.info("─" * 40)
-                        continue
-
                 if not self.running:
                     break
 
                 result = self._fishing_minigame()
+
+                if result is None:
+                    time.sleep(config.POST_CATCH_DELAY)
+                    log.info("─" * 40)
+                    continue
 
                 self.fish_count += 1
                 tag = "成功 ✅" if result else "完成"

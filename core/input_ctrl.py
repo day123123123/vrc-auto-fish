@@ -1,8 +1,8 @@
 """
 输入控制模块
 ============
-PostMessage — Win32 消息投递, 不移动光标不抢焦点。
-摇头功能通过 VRChat OSC API 发送 LookLeft/LookRight。
+PostMessage — Win32 消息投递, 不移动光标不抢焦点 (鼠标)。
+防卡杆动作通过 VRChat OSC API 发送 (不需要聚焦窗口)。
 """
 
 import ctypes
@@ -24,8 +24,14 @@ def _MAKELPARAM(x: int, y: int) -> int:
     return ((y & 0xFFFF) << 16) | (x & 0xFFFF)
 
 
+def _get_osc():
+    """创建 OSC UDP 客户端 (VRChat 默认端口 9000)"""
+    from pythonosc import udp_client
+    return udp_client.SimpleUDPClient("127.0.0.1", 9000)
+
+
 class InputController:
-    """PostMessage 鼠标控制器 + OSC 摇头"""
+    """PostMessage 鼠标控制器 + OSC 防卡杆"""
 
     def __init__(self, window_mgr):
         self.wm = window_mgr
@@ -90,18 +96,21 @@ class InputController:
             self._post(WM_LBUTTONUP, 0)
             self.mouse_is_down = False
 
-    # ────────────────── 摇头 (OSC) ──────────────────
+    # ────────────────── 防卡杆: 摇头 (OSC LookLeft/LookRight) ──────────────────
 
     def shake_head(self):
-        """抛竿前摇头: 右→左，对称两步，始终通过 OSC。"""
+        """抛竿前摇头: 右→左，对称两步，通过 OSC。"""
         import config as _cfg
         t = getattr(_cfg, "SHAKE_HEAD_TIME", 0.01)
         if t <= 0:
             return
         try:
-            from pythonosc import udp_client
-            osc = udp_client.SimpleUDPClient("127.0.0.1", 9000)
-        except Exception:
+            osc = _get_osc()
+        except ImportError:
+            log.warning("[摇头] python-osc 未安装, 跳过摇头 (pip install python-osc)")
+            return
+        except Exception as e:
+            log.warning(f"[摇头] OSC 客户端创建失败: {e}")
             return
         try:
             osc.send_message("/input/LookRight", 1)
@@ -113,8 +122,28 @@ class InputController:
             time.sleep(t)
             osc.send_message("/input/LookLeft", 0)
             time.sleep(0.05)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning(f"[摇头] OSC 发送失败: {e}")
+
+    # ────────────────── 防卡杆: 跳跃 (OSC /input/Jump) ──────────────────
+
+    def jump_toggle(self):
+        """跳跃防卡杆: 通过 OSC 发送 /input/Jump, 不需要聚焦窗口。"""
+        try:
+            osc = _get_osc()
+        except ImportError:
+            log.warning("[跳跃] python-osc 未安装, 跳过 (pip install python-osc)")
+            return
+        except Exception as e:
+            log.warning(f"[跳跃] OSC 客户端创建失败: {e}")
+            return
+        try:
+            osc.send_message("/input/Jump", 1)
+            time.sleep(0.05)
+            osc.send_message("/input/Jump", 0)
+            time.sleep(0.1)
+        except Exception as e:
+            log.warning(f"[跳跃] OSC 发送失败: {e}")
 
     # ────────────────── 安全 ──────────────────
 

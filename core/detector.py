@@ -725,27 +725,6 @@ class ImageDetector:
 
         return result
 
-    def find_catch_bar(self, screen, bar_thresh: float,
-                       hook_thresh: float, search_region=None):
-        """查找白色控制条（模板匹配 → 鱼钩辅助 → 颜色检测）
-        ★ 白条在游戏中总是比模板大, 只用 BAR_SCALES (≤1.0)"""
-        # 方案1: 多尺度匹配白条 (仅低scale)
-        bar = self.find_multiscale(
-            screen, "bar", bar_thresh, search_region,
-            scales=config.BAR_SCALES
-        )
-        if bar:
-            return bar
-
-        # 方案2: 鱼钩辅助定位
-        hook = self.find_multiscale(screen, "hook", hook_thresh, search_region)
-        if hook:
-            bar_tmpl = self.templates.get("bar")
-            bar_h = bar_tmpl.shape[0] if bar_tmpl is not None else 60
-            return (hook[0], hook[1] - bar_h // 2, hook[2], bar_h, hook[4] * 0.9)
-
-        return None
-
     def find_catch_bar_by_color(self, screen, strip_x: int, strip_w: int,
                                 y_top: int, y_bottom: int):
         """颜色检测白条（最后备用方案）"""

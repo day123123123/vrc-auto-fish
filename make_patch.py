@@ -17,7 +17,7 @@ APP_DIRS = ['core', 'gui', 'utils']
 APP_FILES = ['config.py', 'main.py']
 RESOURCE_DIRS = ['img']
 
-EXCLUDE = {'__pycache__', '.pyc', '.pyo'}
+EXCLUDE = {'__pycache__', '.pyc', '.pyo', '.bak'}
 
 
 def should_include(path):

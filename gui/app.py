@@ -42,7 +42,6 @@ TUNABLE_PARAMS = [
     ("搜索下(px)",    "REGION_DOWN",      "int",   "白条锁定后向下搜索的像素数"),
     ("搜索X(px)",     "REGION_X",         "int",   "白条中心左右各N像素范围内检测"),
     ("归正时间(s)",   "POST_CATCH_DELAY", "float", "钓鱼结束/失败后等待N秒再抛竿"),
-    ("摇头时长(s)",   "SHAKE_HEAD_TIME",  "float", "摇头每段按住时长,0=不摇头"),
     ("按压时间(s)",   "INITIAL_PRESS_TIME","float", "开局按压时长(开局延迟0.5s固定)"),
     ("确认帧数",      "VERIFY_CONSECUTIVE","int",   "连续几帧检测到UI才确认小游戏开始"),
     ("成功阈值(%)",   "SUCCESS_PROGRESS", "pct",   "进度条超过此百分比判定钓鱼成功"),
@@ -176,6 +175,52 @@ class FishingApp:
         ttk.Checkbutton(frm_toggles, text="Debug窗口",
                         variable=self.var_show_debug,
                         command=self._on_debug_toggle).pack(side="left", padx=5)
+
+        self.var_skip_success = tk.BooleanVar(value=getattr(config, "SKIP_SUCCESS_CHECK", False))
+        chk_skip = ttk.Checkbutton(frm_toggles, text="跳过成功检查",
+                                   variable=self.var_skip_success,
+                                   command=self._on_skip_success_toggle)
+        chk_skip.pack(side="left", padx=5)
+        self._create_tooltip(chk_skip,
+            "启用后不再检测成功阈值，无论成功失败都点击两次收杆。\n"
+            "因为游戏成功需要点一次才能收杆，失败则不用点。\n"
+            "很多人反馈在成功判定处卡住，开启此选项可避免。")
+
+        # ── 防卡杆 ──
+        frm_anti = ttk.LabelFrame(self.root, text=" 防卡杆（需要开启OSC） ")
+        frm_anti.pack(fill="x", **pad)
+
+        row_mode = ttk.Frame(frm_anti)
+        row_mode.pack(fill="x", padx=5, pady=2)
+
+        self.var_anti_mode = tk.StringVar(
+            value=getattr(config, "ANTI_STUCK_MODE", "shake"))
+        rb_shake = ttk.Radiobutton(row_mode, text="摇头",
+                                   variable=self.var_anti_mode, value="shake",
+                                   command=self._on_anti_mode_change)
+        rb_shake.pack(side="left", padx=5)
+        self._create_tooltip(rb_shake, "抛竿前通过OSC左右摇头，防止长时间挂机卡杆")
+
+        rb_jump = ttk.Radiobutton(row_mode, text="跳跃",
+                                   variable=self.var_anti_mode, value="jump",
+                                   command=self._on_anti_mode_change)
+        rb_jump.pack(side="left", padx=5)
+        self._create_tooltip(rb_jump,
+            "抛竿前通过OSC发送/input/Jump，跳一下防卡杆\n"
+            "和摇头一样纯OSC通信，不需要聚焦窗口")
+
+        row_params = ttk.Frame(frm_anti)
+        row_params.pack(fill="x", padx=5, pady=2)
+
+        ttk.Label(row_params, text="摇头时长(s)").pack(side="left", padx=(5, 2))
+        self.var_shake_time = tk.StringVar(
+            value=f"{config.SHAKE_HEAD_TIME:.3f}")
+        ent_shake = ttk.Entry(row_params, textvariable=self.var_shake_time,
+                              width=6, justify="center")
+        ent_shake.pack(side="left", padx=2)
+        ent_shake.bind("<Return>", lambda e: self._apply_anti_params())
+        ent_shake.bind("<FocusOut>", lambda e: self._apply_anti_params())
+        self._create_tooltip(ent_shake, "摇头每段按住时长(秒), 0=不摇头")
 
         # ── YOLO 控制区 ──
         frm_yolo = ttk.LabelFrame(self.root, text=" YOLO 目标检测 ")
@@ -372,7 +417,6 @@ class FishingApp:
             "REGION_DOWN":      400,
             "REGION_X":         100,
             "POST_CATCH_DELAY": 3.0,
-            "SHAKE_HEAD_TIME":  0.02,
             "INITIAL_PRESS_TIME": 0.2,
             "VERIFY_CONSECUTIVE": 1,
             "SUCCESS_PROGRESS": 0.55,
@@ -383,6 +427,16 @@ class FishingApp:
             if attr in self._param_vars:
                 var, vtype = self._param_vars[attr]
                 var.set(self._config_to_display(attr, vtype))
+
+        config.SKIP_SUCCESS_CHECK = False
+        if hasattr(self, 'var_skip_success'):
+            self.var_skip_success.set(False)
+        config.ANTI_STUCK_MODE = "shake"
+        if hasattr(self, 'var_anti_mode'):
+            self.var_anti_mode.set("shake")
+        config.SHAKE_HEAD_TIME = 0.02
+        if hasattr(self, 'var_shake_time'):
+            self.var_shake_time.set("0.020")
 
         # 删除配置文件
         try:
@@ -407,6 +461,9 @@ class FishingApp:
         data["YOLO_DEVICE"] = config.YOLO_DEVICE
         data["SHOW_DEBUG"] = config.SHOW_DEBUG
         data["FISH_WHITELIST"] = config.FISH_WHITELIST
+        data["SKIP_SUCCESS_CHECK"] = config.SKIP_SUCCESS_CHECK
+        data["ANTI_STUCK_MODE"] = config.ANTI_STUCK_MODE
+        data["SHAKE_HEAD_TIME"] = config.SHAKE_HEAD_TIME
         try:
             with open(config.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -461,6 +518,24 @@ class FishingApp:
                 elif attr == "FISH_WHITELIST":
                     if isinstance(val, dict):
                         config.FISH_WHITELIST.update(val)
+                    loaded.append(attr)
+                elif attr == "SKIP_SUCCESS_CHECK":
+                    config.SKIP_SUCCESS_CHECK = bool(val)
+                    if hasattr(self, 'var_skip_success'):
+                        self.var_skip_success.set(config.SKIP_SUCCESS_CHECK)
+                    loaded.append(attr)
+                elif attr == "ANTI_STUCK_MODE":
+                    if val == "crouch":
+                        val = "jump"
+                    if val in ("shake", "jump"):
+                        config.ANTI_STUCK_MODE = val
+                        if hasattr(self, 'var_anti_mode'):
+                            self.var_anti_mode.set(val)
+                    loaded.append(attr)
+                elif attr == "SHAKE_HEAD_TIME":
+                    config.SHAKE_HEAD_TIME = float(val)
+                    if hasattr(self, 'var_shake_time'):
+                        self.var_shake_time.set(f"{config.SHAKE_HEAD_TIME:.3f}")
                     loaded.append(attr)
                 elif attr in self._param_vars:
                     setattr(config, attr, val)
@@ -657,6 +732,36 @@ class FishingApp:
                 cv2.destroyWindow("Debug Overlay")
             except Exception:
                 pass
+
+    def _on_skip_success_toggle(self):
+        """切换 跳过成功检查"""
+        config.SKIP_SUCCESS_CHECK = self.var_skip_success.get()
+        self._save_settings()
+        state = "开启 (总是点击两次)" if config.SKIP_SUCCESS_CHECK else "关闭"
+        self._log_msg(f"[设置] 跳过成功检查: {state}")
+
+    def _on_anti_mode_change(self):
+        """切换 防卡杆模式"""
+        mode = self.var_anti_mode.get()
+        config.ANTI_STUCK_MODE = mode
+        self._save_settings()
+        labels = {"shake": "摇头", "jump": "跳跃"}
+        self._log_msg(f"[设置] 防卡杆方式: {labels.get(mode, mode)}")
+
+    def _apply_anti_params(self):
+        """应用防卡杆参数 (摇头时长)"""
+        changed = []
+        try:
+            val = float(self.var_shake_time.get().strip())
+            if abs(val - config.SHAKE_HEAD_TIME) > 1e-6:
+                config.SHAKE_HEAD_TIME = val
+                changed.append(f"摇头时长={val:.3f}s")
+        except ValueError:
+            pass
+
+        if changed:
+            self._save_settings()
+            self._log_msg(f"[防卡杆] 已更新: {', '.join(changed)}")
 
     def _preload_yolo(self):
         """后台线程预加载 YOLO 模型，避免阻塞 GUI"""
