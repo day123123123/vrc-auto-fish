@@ -932,12 +932,19 @@ class FishingBot:
                         status_text=f"🐟 小游戏 F{frame:04d} (旋转{self._track_angle:.0f}°补偿中)"
                     )
 
-                # ════════════ ★ 首次检测到鱼 → 激活PD控制 ════════════
+                # ════════════ ★ 至少检测到鱼/条/进度条中2个 → 激活PD控制 ════════════
                 if not _game_active:
-                    if fish is not None:
+                    _det_count = ((fish is not None)
+                                  + (bar is not None)
+                                  + (_yolo_progress is not None))
+                    if _det_count >= 2:
                         _game_active = True
                         had_good_detection = True
-                        log.info("[🐟 开始] 检测到鱼, 小游戏确认! PD控制启动")
+                        _det_names = []
+                        if fish is not None: _det_names.append("鱼")
+                        if bar is not None: _det_names.append("条")
+                        if _yolo_progress is not None: _det_names.append("进度条")
+                        log.info(f"[🐟 开始] 检测到{'+'.join(_det_names)}, 小游戏确认! PD控制启动")
                         if not config.IL_RECORD:
                             press_t = getattr(config, 'INITIAL_PRESS_TIME', 0.2)
                             self.input.mouse_down()
@@ -1132,7 +1139,11 @@ class FishingBot:
                     obj_gone_count = 0
 
                 # ════════════ ★ 控制 (录制 / 模型 / PD) ════════════
-                if _skip_fish:
+                _frame_det = ((fish is not None)
+                              + (bar is not None)
+                              + (_yolo_progress is not None))
+
+                if _skip_fish or _frame_det < 2:
                     self.input.mouse_up()
                     held = False
                 elif config.IL_RECORD:

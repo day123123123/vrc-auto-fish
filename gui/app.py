@@ -616,6 +616,8 @@ class FishingApp:
 
         self.btn_start.config(state="disabled")
         self.btn_stop.config(state="normal")
+        self.btn_roi.config(state="disabled")
+        self.btn_clear_roi.config(state="disabled")
         self._log_msg("[系统] ▶ 开始自动钓鱼")
 
     def _on_stop(self):
@@ -624,6 +626,8 @@ class FishingApp:
         self.bot.input.safe_release()
         self.btn_start.config(state="normal")
         self.btn_stop.config(state="disabled")
+        self.btn_roi.config(state="normal")
+        self.btn_clear_roi.config(state="normal")
         self._log_msg("[系统] ■ 已停止")
         self._save_log()
 
@@ -926,6 +930,8 @@ class FishingApp:
             self.bot.running = False
             self.btn_start.config(state="normal")
             self.btn_stop.config(state="disabled")
+            self.btn_roi.config(state="normal")
+            self.btn_clear_roi.config(state="normal")
 
         self.root.after(100, self._poll)
 

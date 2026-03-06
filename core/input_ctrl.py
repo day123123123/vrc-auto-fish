@@ -98,6 +98,15 @@ class InputController:
 
     # ────────────────── 防卡杆: 摇头 (OSC LookLeft/LookRight) ──────────────────
 
+    def _osc_reset_all(self, osc):
+        """重置所有防卡杆相关的 OSC 信号，防止状态残留"""
+        try:
+            osc.send_message("/input/LookLeft", 0)
+            osc.send_message("/input/LookRight", 0)
+            osc.send_message("/input/Jump", 0)
+        except Exception:
+            pass
+
     def shake_head(self):
         """抛竿前摇头: 右→左，对称两步，通过 OSC。"""
         import config as _cfg
@@ -113,6 +122,7 @@ class InputController:
             log.warning(f"[摇头] OSC 客户端创建失败: {e}")
             return
         try:
+            self._osc_reset_all(osc)
             osc.send_message("/input/LookRight", 1)
             time.sleep(t)
             osc.send_message("/input/LookRight", 0)
@@ -138,6 +148,7 @@ class InputController:
             log.warning(f"[跳跃] OSC 客户端创建失败: {e}")
             return
         try:
+            self._osc_reset_all(osc)
             osc.send_message("/input/Jump", 1)
             time.sleep(0.05)
             osc.send_message("/input/Jump", 0)
