@@ -18,6 +18,7 @@ from core.screen import ScreenCapture
 from core.detector import ImageDetector
 from core.input_ctrl import InputController
 from utils.logger import log
+from utils.i18n import t
 
 import ctypes
 import csv
@@ -41,19 +42,28 @@ def _get_yolo_detector(force_reload=False):
 class FishingBot:
     """VRChat 自动钓鱼机器人"""
 
-    # 鱼模板 → 中文名 + 调试框颜色 (BGR)
+    # Fish template key → (localized name, debug box color BGR)
+    # Names are looked up at runtime via t() so they respect the language setting.
     FISH_DISPLAY = {
-        "fish_black":   ("黑鱼",  (80, 80, 80)),
-        "fish_white":   ("白鱼",  (255, 255, 255)),
-        "fish_copper":  ("铜鱼",  (50, 127, 180)),
-        "fish_green":   ("绿鱼",  (0, 255, 0)),
-        "fish_blue":    ("蓝鱼",  (255, 150, 0)),
-        "fish_purple":  ("紫鱼",  (200, 50, 200)),
-        "fish_golden":  ("金鱼",  (0, 215, 255)),
-        "fish_pink":    ("粉鱼",  (180, 105, 255)),
-        "fish_red":     ("红鱼",  (0, 0, 255)),
-        "fish_rainbow": ("彩鱼",  (0, 255, 255)),
+        "fish_black":   (None, (80, 80, 80)),
+        "fish_white":   (None, (255, 255, 255)),
+        "fish_copper":  (None, (50, 127, 180)),
+        "fish_green":   (None, (0, 255, 0)),
+        "fish_blue":    (None, (255, 150, 0)),
+        "fish_purple":  (None, (200, 50, 200)),
+        "fish_golden":  (None, (0, 215, 255)),
+        "fish_pink":    (None, (180, 105, 255)),
+        "fish_red":     (None, (0, 0, 255)),
+        "fish_rainbow": (None, (0, 255, 255)),
     }
+
+    @staticmethod
+    def fish_name(key: str) -> str:
+        """Return the localized display name for a fish template key."""
+        try:
+            return t(f"fish.{key}")
+        except Exception:
+            return key
 
     def __init__(self):
         self.window   = WindowManager(config.WINDOW_TITLE)
@@ -66,13 +76,13 @@ class FishingBot:
             try:
                 self.yolo = _get_yolo_detector()
             except Exception as e:
-                log.warning(f"[YOLO] 启动加载失败: {e}")
+                log.warning(t("log.yolo_load_fail", e=e))
 
         # ── 共享状态（GUI 读取）──
         self.running    = False
         self.debug_mode = False
         self.fish_count = 0
-        self.state      = "就绪"
+        self.state      = t("state.ready")
 
         # ── PD 控制器状态 ──
         self._bar_prev_cy   = None       # 上一帧白条中心 Y
@@ -170,18 +180,18 @@ class FishingBot:
     # ══════════════════════════════════════════════════════
 
     def _cast_rod(self):
-        self.state = "抛竿中"
+        self.state = t("state.casting")
         if config.IL_RECORD:
-            log.info("[🎣 抛竿] 录制模式 — 请手动抛竿 (点击鼠标)")
+            log.info(t("log.cast_record"))
         else:
             self.input.click()
             time.sleep(0.15)
             mode = getattr(config, "ANTI_STUCK_MODE", "shake")
             if mode == "jump":
-                log.info("[🎣 抛竿] 抛竿 → 跳跃防卡杆")
+                log.info(t("log.cast_jump"))
                 self.input.jump_toggle()
             else:
-                log.info("[🎣 抛竿] 抛竿 → 摇头防卡杆")
+                log.info(t("log.cast_shake"))
                 self.input.shake_head()
         # ★ 从抛竿开始就显示 debug 窗口
         try:
@@ -252,11 +262,11 @@ class FishingBot:
         return False
 
     def _hook_fish(self):
-        self.state = "提竿"
+        self.state = t("state.hooking")
         if config.IL_RECORD:
-            log.info("[🪝 提竿] 录制模式 — 请手动提竿 (点击鼠标)")
+            log.info(t("log.hook_record"))
         else:
-            log.info("[🪝 提竿] 点击鼠标提竿!")
+            log.info(t("log.hook"))
             time.sleep(config.HOOK_PRE_DELAY)
             self.input.click()
         # ★ 提竿后短暂等待, 持续刷新 debug 窗口
@@ -279,7 +289,7 @@ class FishingBot:
         累计 N 帧检测到即确认，优先 YOLO，模板兜底。
         确认后自动计算动态 ROI (仅在未手动框选时生效)。
         """
-        self.state = "验证小游戏"
+        self.state = t("state.verifying")
 
         time.sleep(0.5)
         log.info("[🔍 验证] 延迟0.5s后开始检测小游戏UI...")
@@ -322,21 +332,18 @@ class FishingBot:
                         rw = min(w_scr - rx, (max_x - min_x) + pad_x * 2)
                         rh = min(h_scr - ry, (max_y - min_y) + pad_y * 2)
                         self._auto_roi = (rx, ry, rw, rh)
-                        log.info(
-                            f"[✓ 确认] 检测到UI! "
-                            f"(耗时 {time.time()-t0:.1f}s, {total_frames}帧) "
-                            f"自动ROI: X={rx} Y={ry} {rw}x{rh}")
+                        log.info(t("log.confirmed",
+                            elapsed=time.time()-t0, frames=total_frames,
+                            rx=rx, ry=ry, rw=rw, rh=rh))
                     else:
-                        log.info(
-                            f"[✓ 确认] 检测到UI! "
-                            f"(耗时 {time.time()-t0:.1f}s, {total_frames}帧)")
+                        log.info(t("log.confirmed_no_roi",
+                            elapsed=time.time()-t0, frames=total_frames))
                     return True
 
             time.sleep(0.03)
 
-        log.warning(
-            f"[✗ 误触] {total_frames}帧内未确认小游戏UI "
-            f"(累计命中: {hit_count}/{required})，将重新抛竿")
+        log.warning(t("log.false_trigger",
+            frames=total_frames, hit=hit_count, req=required))
         return False
 
     def _wait_for_minigame_ui(self) -> bool:
@@ -409,7 +416,7 @@ class FishingBot:
             try:
                 self.yolo = _get_yolo_detector()
             except Exception as e:
-                log.warning(f"[YOLO] 加载失败: {e}，回退到模板匹配")
+                log.warning(t("log.yolo_load_warn", e=e))
         _use_yolo = config.USE_YOLO and self.yolo is not None
 
         # ═══════ Phase 1: 等待期间运行 YOLO 检测 (不控制) ═══════
@@ -446,7 +453,7 @@ class FishingBot:
                 return False
 
         # ═══════ Phase 2: 小游戏正式开始 ═══════
-        self.state = "小游戏进行中"
+        self.state = t("state.minigame")
         log.info("[🐟 钓鱼] 小游戏开始")
 
         if config.IL_RECORD:
@@ -821,10 +828,8 @@ class FishingBot:
                     if not _skip_fish and fish_detect_name:
                         wl_key = fish_detect_name
                         if not config.FISH_WHITELIST.get(wl_key, True):
-                            fname_cn = self.FISH_DISPLAY.get(
-                                wl_key, (wl_key,))[0]
-                            log.info(
-                                f"[白名单] {fname_cn} 不在白名单中, 放弃本次钓鱼")
+                            log.info(t("log.whitelist_skip",
+                                name=self.fish_name(wl_key)))
                             _skip_fish = True
 
                 if not _use_yolo and bar is not None and not locked_bar_scales:
