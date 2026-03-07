@@ -1,14 +1,19 @@
 """
-全局配置模块
-============
-所有可调参数集中管理。
+Global configuration module
+============================
+All tunable parameters managed in one place.
 """
 
 import os
 import sys
 
 # ═══════════════════════════════════════════════════════════
-#  路径
+#  Language / 语言 / 言語
+# ═══════════════════════════════════════════════════════════
+LANGUAGE = "zh"   # Options: "zh" (default), "en", "ja"
+
+# ═══════════════════════════════════════════════════════════
+#  Paths
 # ═══════════════════════════════════════════════════════════
 if getattr(sys, 'frozen', False):
     BASE_DIR = sys._MEIPASS

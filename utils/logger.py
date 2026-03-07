@@ -46,7 +46,11 @@ class Logger:
                 f.write("\n".join(self._lines))
                 f.write("\n")
         except Exception as e:
-            print(f"[Logger] 保存日志失败: {e}")
+            try:
+                from utils.i18n import t
+                print(t("log.logger_save_fail", e=e))
+            except Exception:
+                print(f"[Logger] Failed to save log: {e}")
 
     def clear(self):
         """清空内存中的日志缓存"""

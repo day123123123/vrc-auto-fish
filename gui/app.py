@@ -18,34 +18,44 @@ import cv2
 import config
 from core.bot import FishingBot
 from utils.logger import log
+from utils.i18n import t
 
 
 # ═══════════════════════════════════════════════════════════
-#  可调参数定义
-#  (显示名, config属性名, 类型, 单位提示)
-#  类型: "int" / "float" / "ms" (毫秒显示,秒存储)
+#  Tunable parameter definitions
+#  (label, config attr, type, tooltip)  — labels/tips loaded from locale at runtime
+#  type: "int" / "float" / "ms" (display ms, store seconds) / "pct"
 # ═══════════════════════════════════════════════════════════
-TUNABLE_PARAMS = [
-    ("强制提竿(s)",   "BITE_FORCE_HOOK",  "float", "等待N秒无咬钩则强制提竿进入小游戏"),
-    ("鱼像素大小",    "FISH_GAME_SIZE",   "int",   "游戏内鱼图标的大致像素,越小搜索倍率越高"),
-    ("死区(px)",      "DEAD_ZONE",        "int",   "越大越容易触发按住"),
-    ("抗重力基准(ms)","HOLD_MIN_S",       "ms",    "越小下降越快,越大越悬浮"),
-    ("最长按住(ms)",  "HOLD_MAX_S",       "ms",    "单次按住的最大时长"),
-    ("按住增益",      "HOLD_GAIN",        "float", "位置误差×增益=额外按住时长"),
-    ("前瞻时间(s)",   "PREDICT_AHEAD",    "float", "预测未来位置的时间"),
-    ("速度阻尼",      "SPEED_DAMPING",    "float", "下坠快加按住,上升快减按住"),
-    ("最大距离(px)",  "MAX_FISH_BAR_DIST","int",   "鱼条距离超过视为误检"),
-    ("速度平滑",      "VELOCITY_SMOOTH",  "float", "0~1, 越大越平滑"),
-    ("旋转阈值(°)",   "TRACK_MIN_ANGLE",  "float", "轨道倾斜超过此角度启用旋转"),
-    ("旋转上限(°)",   "TRACK_MAX_ANGLE",  "float", "超过此角度视为误检(如海平线)"),
-    ("搜索上(px)",    "REGION_UP",        "int",   "白条锁定后向上搜索的像素数"),
-    ("搜索下(px)",    "REGION_DOWN",      "int",   "白条锁定后向下搜索的像素数"),
-    ("搜索X(px)",     "REGION_X",         "int",   "白条中心左右各N像素范围内检测"),
-    ("归正时间(s)",   "POST_CATCH_DELAY", "float", "钓鱼结束/失败后等待N秒再抛竿"),
-    ("按压时间(s)",   "INITIAL_PRESS_TIME","float", "开局按压时长(开局延迟0.5s固定)"),
-    ("确认帧数",      "VERIFY_CONSECUTIVE","int",   "连续几帧检测到UI才确认小游戏开始"),
-    ("成功阈值(%)",   "SUCCESS_PROGRESS", "pct",   "进度条超过此百分比判定钓鱼成功"),
+_TUNABLE_PARAM_KEYS = [
+    ("BITE_FORCE_HOOK",   "float"),
+    ("FISH_GAME_SIZE",    "int"),
+    ("DEAD_ZONE",         "int"),
+    ("HOLD_MIN_S",        "ms"),
+    ("HOLD_MAX_S",        "ms"),
+    ("HOLD_GAIN",         "float"),
+    ("PREDICT_AHEAD",     "float"),
+    ("SPEED_DAMPING",     "float"),
+    ("MAX_FISH_BAR_DIST", "int"),
+    ("VELOCITY_SMOOTH",   "float"),
+    ("TRACK_MIN_ANGLE",   "float"),
+    ("TRACK_MAX_ANGLE",   "float"),
+    ("REGION_UP",         "int"),
+    ("REGION_DOWN",       "int"),
+    ("REGION_X",          "int"),
+    ("POST_CATCH_DELAY",  "float"),
+    ("INITIAL_PRESS_TIME","float"),
+    ("VERIFY_CONSECUTIVE","int"),
+    ("SUCCESS_PROGRESS",  "pct"),
 ]
+
+
+def _get_tunable_params():
+    """Return TUNABLE_PARAMS with localized labels and tooltips."""
+    result = []
+    for attr, vtype in _TUNABLE_PARAM_KEYS:
+        pair = t(f"params.{attr}")   # [label, tooltip]
+        result.append((pair[0], attr, vtype, pair[1]))
+    return result
 
 
 class FishingApp:
@@ -97,31 +107,31 @@ class FishingApp:
     def _build_ui(self):
         pad = {"padx": 10, "pady": 5}
 
-        # ── 顶部：状态面板 ──
-        frm_status = ttk.LabelFrame(self.root, text=" 状态 ")
+        # ── Status panel ──
+        frm_status = ttk.LabelFrame(self.root, text=t("gui.status_frame"))
         frm_status.pack(fill="x", **pad)
 
         grid_pad = {"padx": 8, "pady": 3, "sticky": "w"}
 
-        self.var_state = tk.StringVar(value="就绪")
-        self.var_window = tk.StringVar(value="未连接")
+        self.var_state = tk.StringVar(value=t("state.ready"))
+        self.var_window = tk.StringVar(value=t("gui.not_connected"))
         self.var_count = tk.StringVar(value="0")
-        self.var_debug = tk.StringVar(value="关闭")
+        self.var_debug = tk.StringVar(value=t("gui.debug_off"))
 
-        ttk.Label(frm_status, text="运行状态:").grid(row=0, column=0, **grid_pad)
+        ttk.Label(frm_status, text=t("gui.state_label")).grid(row=0, column=0, **grid_pad)
         self.lbl_state = ttk.Label(frm_status, textvariable=self.var_state,
                                    foreground="gray")
         self.lbl_state.grid(row=0, column=1, **grid_pad)
 
-        ttk.Label(frm_status, text="VRChat窗口:").grid(row=1, column=0, **grid_pad)
+        ttk.Label(frm_status, text=t("gui.window_label")).grid(row=1, column=0, **grid_pad)
         self.lbl_window = ttk.Label(frm_status, textvariable=self.var_window)
         self.lbl_window.grid(row=1, column=1, **grid_pad)
 
-        ttk.Label(frm_status, text="钓鱼次数:").grid(row=2, column=0, **grid_pad)
+        ttk.Label(frm_status, text=t("gui.count_label")).grid(row=2, column=0, **grid_pad)
         ttk.Label(frm_status, textvariable=self.var_count).grid(
             row=2, column=1, **grid_pad)
 
-        ttk.Label(frm_status, text="调试模式:").grid(row=3, column=0, **grid_pad)
+        ttk.Label(frm_status, text=t("gui.debug_label")).grid(row=3, column=0, **grid_pad)
         ttk.Label(frm_status, textvariable=self.var_debug).grid(
             row=3, column=1, **grid_pad)
 
@@ -129,16 +139,16 @@ class FishingApp:
         frm_ctrl = ttk.Frame(self.root)
         frm_ctrl.pack(fill="x", **pad)
 
-        self.btn_start = ttk.Button(frm_ctrl, text="▶ 开始 (F9)",
+        self.btn_start = ttk.Button(frm_ctrl, text=t("gui.btn_start"),
                                     command=self._on_start, width=15)
         self.btn_start.pack(side="left", padx=5)
 
-        self.btn_stop = ttk.Button(frm_ctrl, text="■ 停止 (F10)",
+        self.btn_stop = ttk.Button(frm_ctrl, text=t("gui.btn_stop"),
                                    command=self._on_stop, width=15,
                                    state="disabled")
         self.btn_stop.pack(side="left", padx=5)
 
-        self.btn_debug = ttk.Button(frm_ctrl, text="调试模式 (F11)",
+        self.btn_debug = ttk.Button(frm_ctrl, text=t("gui.btn_debug"),
                                     command=self._on_toggle_debug, width=15)
         self.btn_debug.pack(side="left", padx=5)
 
@@ -146,19 +156,19 @@ class FishingApp:
         frm_aux = ttk.Frame(self.root)
         frm_aux.pack(fill="x", **pad)
 
-        self.btn_connect = ttk.Button(frm_aux, text="🔗 连接窗口",
+        self.btn_connect = ttk.Button(frm_aux, text=t("gui.btn_connect"),
                                       command=self._on_connect, width=15)
         self.btn_connect.pack(side="left", padx=5)
 
-        self.btn_screenshot = ttk.Button(frm_aux, text="📸 保存截图",
+        self.btn_screenshot = ttk.Button(frm_aux, text=t("gui.btn_screenshot"),
                                          command=self._on_screenshot, width=15)
         self.btn_screenshot.pack(side="left", padx=5)
 
-        self.btn_clearlog = ttk.Button(frm_aux, text="🗑 清空日志",
+        self.btn_clearlog = ttk.Button(frm_aux, text=t("gui.btn_clearlog"),
                                        command=self._on_clear_log, width=12)
         self.btn_clearlog.pack(side="left", padx=5)
 
-        self.btn_whitelist = ttk.Button(frm_aux, text="🐟 白名单",
+        self.btn_whitelist = ttk.Button(frm_aux, text=t("gui.btn_whitelist"),
                                         command=self._on_whitelist, width=12)
         self.btn_whitelist.pack(side="left", padx=5)
 
@@ -167,27 +177,24 @@ class FishingApp:
         frm_toggles.pack(fill="x", **pad)
 
         self.var_topmost = tk.BooleanVar(value=False)
-        ttk.Checkbutton(frm_toggles, text="窗口置顶",
+        ttk.Checkbutton(frm_toggles, text=t("gui.chk_topmost"),
                         variable=self.var_topmost,
                         command=self._on_topmost).pack(side="left", padx=5)
 
         self.var_show_debug = tk.BooleanVar(value=config.SHOW_DEBUG)
-        ttk.Checkbutton(frm_toggles, text="Debug窗口",
+        ttk.Checkbutton(frm_toggles, text=t("gui.chk_debug_win"),
                         variable=self.var_show_debug,
                         command=self._on_debug_toggle).pack(side="left", padx=5)
 
         self.var_skip_success = tk.BooleanVar(value=getattr(config, "SKIP_SUCCESS_CHECK", False))
-        chk_skip = ttk.Checkbutton(frm_toggles, text="跳过成功检查",
+        chk_skip = ttk.Checkbutton(frm_toggles, text=t("gui.chk_skip_success"),
                                    variable=self.var_skip_success,
                                    command=self._on_skip_success_toggle)
         chk_skip.pack(side="left", padx=5)
-        self._create_tooltip(chk_skip,
-            "启用后不再检测成功阈值，无论成功失败都点击两次收杆。\n"
-            "因为游戏成功需要点一次才能收杆，失败则不用点。\n"
-            "很多人反馈在成功判定处卡住，开启此选项可避免。")
+        self._create_tooltip(chk_skip, t("gui.tip_skip_success"))
 
-        # ── 防卡杆 ──
-        frm_anti = ttk.LabelFrame(self.root, text=" 防卡杆（需要开启OSC） ")
+        # ── Anti-jam ──
+        frm_anti = ttk.LabelFrame(self.root, text=t("gui.anti_jam_frame"))
         frm_anti.pack(fill="x", **pad)
 
         row_mode = ttk.Frame(frm_anti)
@@ -195,24 +202,22 @@ class FishingApp:
 
         self.var_anti_mode = tk.StringVar(
             value=getattr(config, "ANTI_STUCK_MODE", "shake"))
-        rb_shake = ttk.Radiobutton(row_mode, text="摇头",
+        rb_shake = ttk.Radiobutton(row_mode, text=t("gui.rb_shake"),
                                    variable=self.var_anti_mode, value="shake",
                                    command=self._on_anti_mode_change)
         rb_shake.pack(side="left", padx=5)
-        self._create_tooltip(rb_shake, "抛竿前通过OSC左右摇头，防止长时间挂机卡杆")
+        self._create_tooltip(rb_shake, t("gui.tip_shake"))
 
-        rb_jump = ttk.Radiobutton(row_mode, text="跳跃",
+        rb_jump = ttk.Radiobutton(row_mode, text=t("gui.rb_jump"),
                                    variable=self.var_anti_mode, value="jump",
                                    command=self._on_anti_mode_change)
         rb_jump.pack(side="left", padx=5)
-        self._create_tooltip(rb_jump,
-            "抛竿前通过OSC发送/input/Jump，跳一下防卡杆\n"
-            "和摇头一样纯OSC通信，不需要聚焦窗口")
+        self._create_tooltip(rb_jump, t("gui.tip_jump"))
 
         row_params = ttk.Frame(frm_anti)
         row_params.pack(fill="x", padx=5, pady=2)
 
-        ttk.Label(row_params, text="摇头时长(s)").pack(side="left", padx=(5, 2))
+        ttk.Label(row_params, text=t("gui.shake_time_label")).pack(side="left", padx=(5, 2))
         self.var_shake_time = tk.StringVar(
             value=f"{config.SHAKE_HEAD_TIME:.3f}")
         ent_shake = ttk.Entry(row_params, textvariable=self.var_shake_time,
@@ -220,22 +225,22 @@ class FishingApp:
         ent_shake.pack(side="left", padx=2)
         ent_shake.bind("<Return>", lambda e: self._apply_anti_params())
         ent_shake.bind("<FocusOut>", lambda e: self._apply_anti_params())
-        self._create_tooltip(ent_shake, "摇头每段按住时长(秒), 0=不摇头")
+        self._create_tooltip(ent_shake, t("gui.tip_shake_time"))
 
-        # ── YOLO 控制区 ──
-        frm_yolo = ttk.LabelFrame(self.root, text=" YOLO 目标检测 ")
+        # ── YOLO detection ──
+        frm_yolo = ttk.LabelFrame(self.root, text=t("gui.yolo_frame"))
         frm_yolo.pack(fill="x", **pad)
 
         config.USE_YOLO = True
-        ttk.Label(frm_yolo, text="YOLO 已启用").pack(side="left", padx=5)
+        ttk.Label(frm_yolo, text="YOLO ✓").pack(side="left", padx=5)
 
         self.var_yolo_collect = tk.BooleanVar(value=config.YOLO_COLLECT)
-        ttk.Checkbutton(frm_yolo, text="采集数据",
+        ttk.Checkbutton(frm_yolo, text=t("gui.collect_data"),
                         variable=self.var_yolo_collect,
                         command=self._on_yolo_collect_toggle).pack(
                             side="left", padx=5)
 
-        ttk.Label(frm_yolo, text="设备:").pack(side="left", padx=(10, 2))
+        ttk.Label(frm_yolo, text=t("gui.device_label")).pack(side="left", padx=(10, 2))
         self.var_yolo_device = tk.StringVar(value=config.YOLO_DEVICE)
         cmb_dev = ttk.Combobox(frm_yolo, textvariable=self.var_yolo_device,
                                values=["auto", "cpu", "gpu"],
@@ -252,16 +257,16 @@ class FishingApp:
         frm_roi = ttk.Frame(self.root)
         frm_roi.pack(fill="x", **pad)
 
-        self.btn_roi = ttk.Button(frm_roi, text="📐 框选检测区域",
+        self.btn_roi = ttk.Button(frm_roi, text=t("gui.btn_roi"),
                                   command=self._on_select_roi, width=15)
         self.btn_roi.pack(side="left", padx=5)
 
-        self.btn_clear_roi = ttk.Button(frm_roi, text="✕ 清除区域",
+        self.btn_clear_roi = ttk.Button(frm_roi, text=t("gui.btn_clear_roi"),
                                         command=self._on_clear_roi, width=12)
         self.btn_clear_roi.pack(side="left", padx=5)
 
-        self.var_roi = tk.StringVar(value="未设置 (全屏搜索)")
-        ttk.Label(frm_roi, text="检测区域:").pack(side="left", padx=(10, 2))
+        self.var_roi = tk.StringVar(value=t("gui.roi_not_set"))
+        ttk.Label(frm_roi, text=t("gui.detect_region_label")).pack(side="left", padx=(10, 2))
         self.lbl_roi = ttk.Label(frm_roi, textvariable=self.var_roi,
                                  foreground="gray")
         self.lbl_roi.pack(side="left")
@@ -271,8 +276,8 @@ class FishingApp:
         # ── 参数调节面板 ──
         self._build_params_panel(pad)
 
-        # ── 底部：日志 ──
-        frm_log = ttk.LabelFrame(self.root, text=" 日志 ")
+        # ── Log panel ──
+        frm_log = ttk.LabelFrame(self.root, text=t("gui.log_frame"))
         frm_log.pack(fill="both", expand=True, **pad)
 
         self.txt_log = scrolledtext.ScrolledText(
@@ -288,14 +293,15 @@ class FishingApp:
     # ══════════════════════════════════════════════════════
 
     def _build_params_panel(self, pad):
-        """构建小游戏参数实时调节面板"""
-        frm = ttk.LabelFrame(self.root, text=" 小游戏参数 (实时生效) ")
+        """Build the mini-game parameter tuning panel."""
+        frm = ttk.LabelFrame(self.root, text=t("gui.params_frame"))
         frm.pack(fill="x", **pad)
 
-        # 4列布局: [标签 输入框] [标签 输入框]
+        # 4-column layout: [label entry] [label entry]
         cols_per_row = 2
         gpad = {"padx": 4, "pady": 2}
 
+        TUNABLE_PARAMS = _get_tunable_params()
         for i, (label, attr, vtype, tip) in enumerate(TUNABLE_PARAMS):
             row = i // cols_per_row
             col_base = (i % cols_per_row) * 3   # 每组占3列: label, entry, unit
@@ -328,9 +334,9 @@ class FishingApp:
         btn_frame.grid(row=total_rows, column=0, columnspan=6,
                        pady=(5, 5), sticky="e", padx=10)
 
-        ttk.Button(btn_frame, text="应用参数",
+        ttk.Button(btn_frame, text=t("gui.apply_params"),
                    command=self._apply_params, width=10).pack(side="left", padx=3)
-        ttk.Button(btn_frame, text="恢复默认",
+        ttk.Button(btn_frame, text=t("gui.reset_params"),
                    command=self._reset_params, width=10).pack(side="left", padx=3)
 
     def _config_to_display(self, attr: str, vtype: str) -> str:
@@ -396,7 +402,7 @@ class FishingApp:
 
         if changed:
             self._save_settings()
-            self._log_msg(f"[参数] 已更新并保存: {', '.join(changed)}")
+            self._log_msg(t("gui.log_params_updated", changes=", ".join(changed)))
 
     def _reset_params(self):
         """恢复所有参数到默认值并删除配置文件"""
@@ -445,7 +451,7 @@ class FishingApp:
                 os.remove(config.SETTINGS_FILE)
         except Exception:
             pass
-        self._log_msg("[参数] 已恢复默认值")
+        self._log_msg(t("gui.log_params_reset"))
 
     # ══════════════════════════════════════════════════════
     #  参数持久化
@@ -468,7 +474,7 @@ class FishingApp:
             with open(config.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            self._log_msg(f"[警告] 保存配置失败: {e}")
+            self._log_msg(t("gui.log_save_config_fail", e=e))
 
     def _load_settings(self):
         """启动时从 settings.json 加载参数"""
@@ -545,7 +551,7 @@ class FishingApp:
             if loaded:
                 pass
         except Exception as e:
-            self._log_msg(f"[警告] 加载配置失败: {e}")
+            self._log_msg(t("gui.log_load_config_fail", e=e))
 
     @staticmethod
     def _create_tooltip(widget, text: str):
@@ -590,15 +596,15 @@ class FishingApp:
             return
 
         if self._has_non_ascii(config.BASE_DIR):
-            self._log_msg("[错误] 程序所在路径包含中文或特殊字符，会导致图片/模型加载失败！")
-            self._log_msg(f"  当前路径: {config.BASE_DIR}")
-            self._log_msg("  请将程序移动到纯英文路径下再运行，例如: D:\\fish")
+            self._log_msg(t("gui.log_path_error"))
+            self._log_msg(t("gui.log_path_current", path=config.BASE_DIR))
+            self._log_msg(t("gui.log_path_hint"))
             return
 
-        # 先尝试连接窗口
+        # Try to connect window first
         if not self.bot.window.is_valid():
             if not self.bot.window.find():
-                self._log_msg("[错误] 未找到 VRChat 窗口！请确保游戏正在运行。")
+                self._log_msg(t("gui.log_not_found"))
                 return
 
         self.var_window.set(f"{self.bot.window.title} (HWND={self.bot.window.hwnd})")
@@ -607,9 +613,9 @@ class FishingApp:
         self._apply_params()
 
         self.bot.running = True
-        self.bot.state = "运行中"
+        self.bot.state = t("state.running")
 
-        # 启动后台线程
+        # Start background thread
         if self.bot_thread is None or not self.bot_thread.is_alive():
             self.bot_thread = threading.Thread(target=self.bot.run, daemon=True)
             self.bot_thread.start()
@@ -618,7 +624,7 @@ class FishingApp:
         self.btn_stop.config(state="normal")
         self.btn_roi.config(state="disabled")
         self.btn_clear_roi.config(state="disabled")
-        self._log_msg("[系统] ▶ 开始自动钓鱼")
+        self._log_msg(t("gui.log_start"))
 
     def _on_stop(self):
         """停止钓鱼"""
@@ -628,17 +634,19 @@ class FishingApp:
         self.btn_stop.config(state="disabled")
         self.btn_roi.config(state="normal")
         self.btn_clear_roi.config(state="normal")
-        self._log_msg("[系统] ■ 已停止")
+        self._log_msg(t("gui.log_stop"))
         self._save_log()
 
     def _on_toggle_debug(self):
-        """切换调试模式"""
+        """Toggle debug mode."""
         self.bot.debug_mode = not self.bot.debug_mode
-        tag = "开启" if self.bot.debug_mode else "关闭"
-        self.var_debug.set(tag)
-        self._log_msg(f"[系统] 调试模式: {tag}")
         if self.bot.debug_mode:
-            self._log_msg("[提示] 调试截图将保存到 debug/ 目录，检测器将输出置信度")
+            self.var_debug.set(t("gui.debug_on"))
+            self._log_msg(t("gui.log_debug_on"))
+            self._log_msg(t("gui.log_debug_hint"))
+        else:
+            self.var_debug.set(t("gui.debug_off"))
+            self._log_msg(t("gui.log_debug_off"))
 
     def _on_connect(self):
         """手动连接 VRChat 窗口"""
@@ -646,29 +654,30 @@ class FishingApp:
             self.var_window.set(
                 f"{self.bot.window.title} (HWND={self.bot.window.hwnd})"
             )
-            # 重置截图方式，下次截图时重新检测 PrintWindow
+            # Reset capture method; will re-detect PrintWindow on next capture
             self.bot.screen.reset_capture_method()
-            self._log_msg(f"[系统] 已连接: {self.bot.window.title}")
+            self._log_msg(t("gui.log_connected", title=self.bot.window.title))
         else:
-            self.var_window.set("未找到")
-            self._log_msg("[错误] 未找到 VRChat 窗口")
+            self.var_window.set(t("gui.not_connected"))
+            self._log_msg(t("gui.log_not_found"))
 
     def _on_screenshot(self):
         """手动保存当前截图（调试用）"""
         if not self.bot.window.is_valid():
             if not self.bot.window.find():
-                self._log_msg("[错误] 无法截图: 未连接 VRChat 窗口")
+                self._log_msg(t("gui.log_screenshot_no_window"))
                 return
 
         img, region = self.screen_capture_safe()
         if img is not None:
             self.bot.screen.save_debug(img, "manual_screenshot")
             h, w = img.shape[:2]
-            self._log_msg(f"[截图] 已保存 ({w}×{h}) → debug/manual_screenshot.png")
+            self._log_msg(t("gui.log_screenshot_saved", w=w, h=h))
             if region:
-                self._log_msg(f"       窗口区域: x={region[0]} y={region[1]} w={region[2]} h={region[3]}")
+                self._log_msg(t("gui.log_screenshot_region",
+                    x=region[0], y=region[1], w=region[2], h=region[3]))
         else:
-            self._log_msg("[错误] 截图失败")
+            self._log_msg(t("gui.log_screenshot_fail"))
 
     def _on_clear_log(self):
         """清空日志文本框"""
@@ -677,44 +686,37 @@ class FishingApp:
         self.txt_log.config(state="disabled")
 
     def _on_whitelist(self):
-        """弹窗: 勾选要钓的鱼种"""
-        FISH_NAMES = [
-            ("fish_black",   "黑鱼"),
-            ("fish_white",   "白鱼"),
-            ("fish_copper",  "铜鱼"),
-            ("fish_green",   "绿鱼"),
-            ("fish_blue",    "蓝鱼"),
-            ("fish_purple",  "紫鱼"),
-            ("fish_pink",    "粉鱼"),
-            ("fish_red",     "红鱼"),
-            ("fish_rainbow", "彩鱼"),
+        """Popup: select which fish types to catch."""
+        FISH_KEYS = [
+            "fish_black", "fish_white", "fish_copper", "fish_green",
+            "fish_blue", "fish_purple", "fish_pink", "fish_red", "fish_rainbow",
         ]
         win = tk.Toplevel(self.root)
-        win.title("钓鱼白名单")
+        win.title(t("gui.whitelist_title"))
         win.geometry("200x320")
         win.resizable(False, False)
         win.transient(self.root)
         win.grab_set()
 
-        ttk.Label(win, text="勾选要钓的鱼:").pack(pady=(10, 5))
+        ttk.Label(win, text=t("gui.whitelist_label")).pack(pady=(10, 5))
 
         wl = config.FISH_WHITELIST
         chk_vars = {}
-        for key, name in FISH_NAMES:
+        for key in FISH_KEYS:
             var = tk.BooleanVar(value=wl.get(key, True))
             chk_vars[key] = var
-            ttk.Checkbutton(win, text=name, variable=var).pack(
+            ttk.Checkbutton(win, text=t(f"fish.{key}"), variable=var).pack(
                 anchor="w", padx=30)
 
         def _apply():
             for key, var in chk_vars.items():
                 config.FISH_WHITELIST[key] = var.get()
             self._save_settings()
-            enabled = [n for (k, n) in FISH_NAMES if chk_vars[k].get()]
-            self._log_msg(f"[白名单] 已更新: {', '.join(enabled)}")
+            enabled = [t(f"fish.{k}") for k in FISH_KEYS if chk_vars[k].get()]
+            self._log_msg(t("gui.log_whitelist_updated", names=", ".join(enabled)))
             win.destroy()
 
-        ttk.Button(win, text="确定", command=_apply).pack(pady=10)
+        ttk.Button(win, text=t("gui.whitelist_ok"), command=_apply).pack(pady=10)
 
     def _on_topmost(self):
         """切换窗口置顶 (用 int 0/1 确保兼容性)"""
@@ -725,12 +727,13 @@ class FishingApp:
             self.root.focus_force()
 
     def _on_debug_toggle(self):
-        """切换 debug 窗口显示"""
+        """Toggle debug window display."""
         config.SHOW_DEBUG = self.var_show_debug.get()
         self._save_settings()
-        state = "开启" if config.SHOW_DEBUG else "关闭 (提升性能)"
-        self._log_msg(f"[Debug] 调试窗口: {state}")
-        if not config.SHOW_DEBUG:
+        if config.SHOW_DEBUG:
+            self._log_msg(t("gui.log_debug_win_on"))
+        else:
+            self._log_msg(t("gui.log_debug_win_off"))
             try:
                 import cv2
                 cv2.destroyWindow("Debug Overlay")
@@ -738,70 +741,71 @@ class FishingApp:
                 pass
 
     def _on_skip_success_toggle(self):
-        """切换 跳过成功检查"""
+        """Toggle skip-success-check setting."""
         config.SKIP_SUCCESS_CHECK = self.var_skip_success.get()
         self._save_settings()
-        state = "开启 (总是点击两次)" if config.SKIP_SUCCESS_CHECK else "关闭"
-        self._log_msg(f"[设置] 跳过成功检查: {state}")
+        if config.SKIP_SUCCESS_CHECK:
+            self._log_msg(t("gui.log_skip_on"))
+        else:
+            self._log_msg(t("gui.log_skip_off"))
 
     def _on_anti_mode_change(self):
-        """切换 防卡杆模式"""
+        """Switch anti-jam mode."""
         mode = self.var_anti_mode.get()
         config.ANTI_STUCK_MODE = mode
         self._save_settings()
-        labels = {"shake": "摇头", "jump": "跳跃"}
-        self._log_msg(f"[设置] 防卡杆方式: {labels.get(mode, mode)}")
+        label_key = "log_anti_shake" if mode == "shake" else "log_anti_jump"
+        self._log_msg(t("gui.log_anti_mode", mode=t(f"gui.{label_key}")))
 
     def _apply_anti_params(self):
-        """应用防卡杆参数 (摇头时长)"""
+        """Apply anti-jam parameters (shake duration)."""
         changed = []
         try:
             val = float(self.var_shake_time.get().strip())
             if abs(val - config.SHAKE_HEAD_TIME) > 1e-6:
                 config.SHAKE_HEAD_TIME = val
-                changed.append(f"摇头时长={val:.3f}s")
+                changed.append(t("gui.log_shake_time", val=val))
         except ValueError:
             pass
 
         if changed:
             self._save_settings()
-            self._log_msg(f"[防卡杆] 已更新: {', '.join(changed)}")
+            self._log_msg(t("gui.log_anti_params", changes=", ".join(changed)))
 
     def _preload_yolo(self):
-        """后台线程预加载 YOLO 模型，避免阻塞 GUI"""
+        """Preload YOLO model in a background thread to avoid blocking the GUI."""
         def _load():
             try:
                 from core.bot import _get_yolo_detector
                 self.bot.yolo = _get_yolo_detector()
-                pass
             except Exception as e:
-                self._log_msg(f"[YOLO] 预加载失败: {e}")
-        t = threading.Thread(target=_load, daemon=True)
-        t.start()
+                self._log_msg(t("gui.log_yolo_preload_fail", e=e))
+        _thread = threading.Thread(target=_load, daemon=True)
+        _thread.start()
 
     def _on_yolo_collect_toggle(self):
-        """切换 YOLO 数据采集模式"""
+        """Toggle YOLO data collection mode."""
         collect = self.var_yolo_collect.get()
         config.YOLO_COLLECT = collect
         self._save_settings()
         if collect:
-            self._log_msg(
-                "[YOLO] 数据采集已开启 — 钓鱼时将自动保存截图"
-            )
+            self._log_msg(t("gui.log_yolo_collect_on"))
         else:
-            self._log_msg("[YOLO] 数据采集已关闭")
+            self._log_msg(t("gui.log_yolo_collect_off"))
 
     def _on_yolo_device_change(self, _event=None):
-        """切换 YOLO 推理设备"""
+        """Switch YOLO inference device."""
         dev = self.var_yolo_device.get()
         config.YOLO_DEVICE = dev
         self._save_settings()
-        labels = {"auto": "自动 (优先GPU)", "cpu": "CPU (不占显卡)",
-                  "gpu": "GPU (需要CUDA)"}
-        self._log_msg(f"[YOLO] 设备已切换: {labels.get(dev, dev)} — 下次启动生效")
+        dev_key = {"auto": "log_yolo_device_auto",
+                   "cpu":  "log_yolo_device_cpu",
+                   "gpu":  "log_yolo_device_gpu"}.get(dev, dev)
+        label = t(f"gui.{dev_key}") if dev in ("auto", "cpu", "gpu") else dev
+        self._log_msg(t("gui.log_yolo_device", label=label))
 
     def _update_yolo_status(self):
-        """更新 YOLO 状态显示"""
+        """Update YOLO status display."""
         import os as _os
         model_ok = _os.path.exists(config.YOLO_MODEL)
         unlabeled = _os.path.join(
@@ -818,30 +822,24 @@ class FishingApp:
         ]) if _os.path.isdir(train) else 0
 
         parts = []
-        if model_ok:
-            parts.append("模型 ✓")
-        else:
-            parts.append("模型 ✗")
-        parts.append(f"训练:{n_train}")
-        parts.append(f"未标:{n_unlabeled}")
+        parts.append(t("gui.yolo_model_ok") if model_ok else t("gui.yolo_model_missing"))
+        parts.append(t("gui.yolo_train_count", n=n_train))
+        parts.append(t("gui.yolo_unlabeled_count", n=n_unlabeled))
         self.var_yolo_status.set(" | ".join(parts))
 
     def _on_select_roi(self):
         """框选钓鱼UI检测区域"""
         if not self.bot.window.is_valid():
             if not self.bot.window.find():
-                self._log_msg("[错误] 请先连接 VRChat 窗口")
+                self._log_msg(t("gui.log_roi_error_window"))
                 return
 
         img, _ = self.screen_capture_safe()
         if img is None:
-            self._log_msg("[错误] 截图失败, 无法框选")
+            self._log_msg(t("gui.log_roi_error_capture"))
             return
 
-        self._log_msg(
-            "[框选] 请在弹出窗口中用鼠标框选钓鱼UI区域, "
-            "按回车确认, 按ESC取消"
-        )
+        self._log_msg(t("gui.log_roi_prompt"))
 
         win_name = "Select Fishing ROI - Enter=OK / Esc=Cancel"
         cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
@@ -860,26 +858,24 @@ class FishingApp:
             self._save_settings()
             self.var_roi.set(f"X={x} Y={y} {w_r}x{h_r}")
             self.lbl_roi.config(foreground="green")
-            self._log_msg(
-                f"[框选] ✓ 检测区域已设置: X={x} Y={y} {w_r}x{h_r}"
-            )
+            self._log_msg(t("gui.log_roi_set", x=x, y=y, w=w_r, h=h_r))
         else:
-            self._log_msg("[框选] 已取消 (区域太小或按了ESC)")
+            self._log_msg(t("gui.log_roi_cancel"))
 
     def _on_clear_roi(self):
-        """清除框选区域"""
+        """Clear the ROI selection."""
         config.DETECT_ROI = None
         self._save_settings()
-        self.var_roi.set("未设置 (全屏搜索)")
+        self.var_roi.set(t("gui.roi_not_set"))
         self.lbl_roi.config(foreground="gray")
-        self._log_msg("[框选] 已清除检测区域, 将使用全屏搜索")
+        self._log_msg(t("gui.log_roi_cleared"))
 
     def screen_capture_safe(self):
-        """安全截取屏幕"""
+        """Safely capture the VRChat window."""
         try:
             return self.bot.screen.grab_window(self.bot.window)
         except Exception as e:
-            self._log_msg(f"[错误] 截图异常: {e}")
+            self._log_msg(f"[Error] Screenshot error: {e}")
             return None, None
 
     # ══════════════════════════════════════════════════════
@@ -969,4 +965,4 @@ class FishingApp:
         import os
         path = os.path.join(config.DEBUG_DIR, "last_run.log")
         log.save(path)
-        self._log_msg(f"[系统] 日志已保存 → {path}")
+        self._log_msg(t("gui.log_saved", path=path))
