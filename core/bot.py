@@ -236,20 +236,31 @@ class FishingBot:
             return False, None
         return False
 
-    def _verify_game_alive(self) -> bool:
-        """快速检查小游戏UI是否仍然存在 (无延迟)。
-        用于游戏结束条件触发后的二次确认。"""
-        n = getattr(config, "VERIFY_FRAMES", 5)
-        for i in range(n):
-            if not self.running:
-                return False
+    def _wait_until_ui_gone(self, timeout=3.0, clear_frames=2):
+        """收杆后等待上一轮小游戏 UI 消失，避免串到下一轮。"""
+        self.state = "等待UI消失"
+        t0 = time.time()
+        clear_count = 0
+
+        while self.running and time.time() - t0 < timeout:
             screen = self._grab()
-            self._show_debug_overlay(
-                screen,
-                status_text=f"🔍 验证小游戏 ({i+1}/{n})")
-            if self._detect_ui_once(screen):
-                return True
-            time.sleep(0.03)
+            ui_found = self._detect_ui_once(screen)
+            if ui_found:
+                clear_count = 0
+                self._show_debug_overlay(
+                    screen,
+                    status_text="⏳ 等待上一轮小游戏UI消失..."
+                )
+            else:
+                clear_count += 1
+                self._show_debug_overlay(
+                    screen,
+                    status_text=f"✅ UI退场确认 {clear_count}/{clear_frames}"
+                )
+                if clear_count >= clear_frames:
+                    return True
+            time.sleep(0.05)
+
         return False
 
     def _hook_fish(self):
@@ -271,74 +282,6 @@ class FishingBot:
             except Exception:
                 pass
             time.sleep(0.05)
-
-    def _verify_minigame(self) -> bool:
-        """
-        提竿后验证钓鱼小游戏 UI 是否真的出现了。
-
-        延迟 0.5s 等待 UI 渲染，然后用十多帧(~15帧)快速确认。
-        累计 N 帧检测到即确认，优先 YOLO，模板兜底。
-        确认后自动计算动态 ROI (仅在未手动框选时生效)。
-        """
-        self.state = "验证小游戏"
-
-        time.sleep(0.5)
-        log.info("[🔍 验证] 延迟0.5s后开始检测小游戏UI...")
-
-        t0 = time.time()
-        hit_count = 0
-        required = config.VERIFY_CONSECUTIVE
-        total_frames = 0
-        max_frames = getattr(config, "VERIFY_FRAMES", 5)
-
-        self._track_angle = 0.0
-        self._need_rotation = False
-        self._auto_roi = None
-        last_bbox = None
-
-        while self.running and total_frames < max_frames and (time.time() - t0 < config.VERIFY_TIMEOUT):
-            screen = self._grab()
-            total_frames += 1
-
-            self._show_debug_overlay(
-                screen,
-                status_text=f"🔍 验证UI ({hit_count}/{required}) 帧{total_frames}/{max_frames}"
-            )
-
-            found, bbox = self._detect_ui_once(screen, return_bbox=True)
-            if bbox is not None:
-                last_bbox = bbox
-
-            if found:
-                hit_count += 1
-                if hit_count >= required:
-                    self._track_angle = 0.0
-
-                    if last_bbox is not None and config.DETECT_ROI is None:
-                        min_x, min_y, max_x, max_y = last_bbox
-                        h_scr, w_scr = screen.shape[:2]
-                        pad_x, pad_y = 120, 150
-                        rx = max(0, min_x - pad_x)
-                        ry = max(0, min_y - pad_y)
-                        rw = min(w_scr - rx, (max_x - min_x) + pad_x * 2)
-                        rh = min(h_scr - ry, (max_y - min_y) + pad_y * 2)
-                        self._auto_roi = (rx, ry, rw, rh)
-                        log.info(
-                            f"[✓ 确认] 检测到UI! "
-                            f"(耗时 {time.time()-t0:.1f}s, {total_frames}帧) "
-                            f"自动ROI: X={rx} Y={ry} {rw}x{rh}")
-                    else:
-                        log.info(
-                            f"[✓ 确认] 检测到UI! "
-                            f"(耗时 {time.time()-t0:.1f}s, {total_frames}帧)")
-                    return True
-
-            time.sleep(0.03)
-
-        log.warning(
-            f"[✗ 误触] {total_frames}帧内未确认小游戏UI "
-            f"(累计命中: {hit_count}/{required})，将重新抛竿")
-        return False
 
     def _wait_for_minigame_ui(self) -> bool:
         """
@@ -413,7 +356,8 @@ class FishingBot:
                 log.warning(f"[YOLO] 加载失败: {e}，回退到模板匹配")
         _use_yolo = config.USE_YOLO and self.yolo is not None
 
-        # ═══════ Phase 1: 等待期间运行 YOLO 检测 (不控制) ═══════
+        # ═══════ Phase 1: 等待期间持续检测, 支持提前切入小游戏 ═══════
+        _entered_minigame_early = False
         if not config.IL_RECORD:
             wait_s = config.BITE_FORCE_HOOK
             log.info(f"[⏳ 等待] 等待 {wait_s:.0f}s 后提竿, 同时运行检测...")
@@ -426,15 +370,38 @@ class FishingBot:
                 try:
                     _wait_screen = self._grab()
                     _pre_fish, _pre_bar = None, None
+                    _pre_progress = None
                     if _use_yolo:
                         _yd = self.yolo.detect(
                             _wait_screen,
                             roi=config.DETECT_ROI or self._auto_roi)
                         _pre_fish = _yd.get("fish")
                         _pre_bar = _yd.get("bar")
+                        _pre_progress = _yd.get("progress")
                     self._show_debug_overlay(
                         _wait_screen, _pre_fish, _pre_bar,
                         status_text=f"⏳ 等待提竿 ({_wait_elapsed:.0f}/{wait_s:.0f}s)")
+
+                    # 如果等待阶段已经检测到鱼，说明可能因为异常提前提竿，
+                    # 此时直接切换到小游戏流程。
+                    if _pre_fish is not None:
+                        _ui_found = False
+                        if _pre_bar is not None or _pre_progress is not None:
+                            _ui_found = True
+                        else:
+                            try:
+                                _ui_found = self._detect_ui_once(_wait_screen)
+                            except Exception:
+                                _ui_found = False
+
+                        if _ui_found:
+                            _entered_minigame_early = True
+                            self.state = "小游戏进行中"
+                            log.warning(
+                                f"[⚠ 提前进入] 设定提竿时间前 {_wait_elapsed:.1f}s "
+                                f"已检测到鱼/小游戏UI，判定已提前拉杆，"
+                                f"直接切入小游戏控制阶段")
+                            break
                 except Exception:
                     pass
                 time.sleep(0.2)
@@ -442,13 +409,17 @@ class FishingBot:
             if not self.running:
                 return False
 
-            self._hook_fish()
-            if not self.running:
-                return False
+            if not _entered_minigame_early:
+                self._hook_fish()
+                if not self.running:
+                    return False
 
         # ═══════ Phase 2: 小游戏正式开始 ═══════
         self.state = "小游戏进行中"
-        log.info("[🐟 钓鱼] 小游戏开始")
+        if _entered_minigame_early:
+            log.info("[🐟 钓鱼] 检测到已提前进入小游戏，开始接管控制")
+        else:
+            log.info("[🐟 钓鱼] 小游戏开始")
 
         if config.IL_RECORD:
             self._il_start_recording()
@@ -567,7 +538,7 @@ class FishingBot:
                     f"Y={bsy}~{bsy+bsh} (下半屏)"
                 )
 
-        _game_active = False
+        _game_active = _entered_minigame_early
         _hook_time = time.time()
         _HOOK_DETECT_TIMEOUT = 1.5
         _hook_timeout_retry = False
@@ -645,23 +616,15 @@ class FishingBot:
                         no_detect += 1
                         if no_detect > 5:
                             self.input.mouse_up()
-                        if no_detect > config.TRACK_LOST_LIMIT:
-                            if _game_active and self._verify_game_alive():
-                                log.info(f"[✓ 恢复] 连续{no_detect}帧丢失, 但验证UI仍在")
-                                no_detect = 0
-                                fish_lost = 0
-                                fish_gone_since = None
-                                bar_gone_since = None
-                                obj_gone_count = 0
-                            else:
-                                log.info(
-                                    f"[📋 结束] 连续{no_detect}帧未检测到"
-                                    f"有效UI，验证确认游戏已结束")
-                                break
+                        if no_detect >= config.VERIFY_FRAMES:
+                            log.info(
+                                f"[📋 结束] 连续{no_detect}帧未检测到有效UI，"
+                                f"达到结束帧数 {config.VERIFY_FRAMES}")
+                            break
                         # ★ debug 窗口仍然刷新
                         self._show_debug_overlay(
                             screen_raw,
-                            status_text=f"⚠ 丢失中 {no_detect}/{config.TRACK_LOST_LIMIT}"
+                            status_text=f"⚠ 丢失中 {no_detect}/{config.VERIFY_FRAMES}"
                         )
                         time.sleep(config.GAME_LOOP_INTERVAL)
                         continue
@@ -1033,17 +996,11 @@ class FishingBot:
                         )
                         self.screen.save_debug(screen, "minigame_lost")
 
-                    if no_detect > config.TRACK_LOST_LIMIT:
-                        if self._verify_game_alive():
-                            log.info(f"[✓ 恢复] 连续{no_detect}帧丢失, 但验证UI仍在")
-                            no_detect = 0
-                            fish_lost = 0
-                            fish_gone_since = None
-                            bar_gone_since = None
-                            obj_gone_count = 0
-                        else:
-                            log.info(f"[📋 结束] 连续{no_detect}帧未检测到有效UI，验证确认结束")
-                            break
+                    if no_detect >= config.VERIFY_FRAMES:
+                        log.info(
+                            f"[📋 结束] 连续{no_detect}帧未检测到有效UI，"
+                            f"达到结束帧数 {config.VERIFY_FRAMES}")
+                        break
 
                     time.sleep(config.GAME_LOOP_INTERVAL)
                     continue
@@ -1060,14 +1017,8 @@ class FishingBot:
                     if fish_lost == 30:
                         log.warning(f"[⚠ 鱼丢失] 连续{fish_lost}帧未检测到鱼")
                     if had_good_detection and fish_lost > config.FISH_LOST_LIMIT:
-                        if self._verify_game_alive():
-                            log.info(f"[✓ 恢复] 鱼消失{fish_lost}帧, 但验证UI仍在")
-                            fish_lost = 0
-                            fish_gone_since = None
-                            no_detect = 0
-                        else:
-                            log.info(f"[📋 结束] 鱼已消失{fish_lost}帧，验证确认结束")
-                            break
+                        log.info(f"[📋 结束] 鱼已消失{fish_lost}帧，直接判定结束")
+                        break
                 else:
                     fish_lost = 0
                     fish_gone_since = None
@@ -1085,26 +1036,15 @@ class FishingBot:
                 if (had_good_detection and fish_gone_since is not None
                         and now_t - fish_gone_since > _timeout):
                     elapsed = now_t - fish_gone_since
-                    if self._verify_game_alive():
-                        log.info(f"[✓ 恢复] 鱼消失{elapsed:.1f}s, 但验证UI仍在")
-                        fish_gone_since = None
-                        fish_lost = 0
-                        no_detect = 0
-                    else:
-                        log.info(
-                            f"[📋 失败] 鱼连续消失 {elapsed:.1f}s, 验证确认结束")
-                        break
+                    log.info(
+                        f"[📋 失败] 鱼连续消失 {elapsed:.1f}s, 直接判定结束")
+                    break
                 if (had_good_detection and bar_gone_since is not None
                         and now_t - bar_gone_since > _timeout):
                     elapsed = now_t - bar_gone_since
-                    if self._verify_game_alive():
-                        log.info(f"[✓ 恢复] 白条消失{elapsed:.1f}s, 但验证UI仍在")
-                        bar_gone_since = None
-                        no_detect = 0
-                    else:
-                        log.info(
-                            f"[📋 失败] 白条连续消失 {elapsed:.1f}s, 验证确认结束")
-                        break
+                    log.info(
+                        f"[📋 失败] 白条连续消失 {elapsed:.1f}s, 直接判定结束")
+                    break
 
                 # 3) ★ 对象不足检测: 鱼/条/轨道 至少2个才继续
                 if obj_count < config.OBJ_MIN_COUNT:
@@ -1119,18 +1059,10 @@ class FishingBot:
                             f"({obj_gone_count}/{config.OBJ_GONE_LIMIT})"
                         )
                     if obj_gone_count >= config.OBJ_GONE_LIMIT:
-                        if self._verify_game_alive():
-                            log.info(f"[✓ 恢复] 对象不足{obj_gone_count}帧, 但验证UI仍在")
-                            obj_gone_count = 0
-                            no_detect = 0
-                            fish_lost = 0
-                            fish_gone_since = None
-                            bar_gone_since = None
-                        else:
-                            log.info(
-                                f"[📋 结束] 连续{obj_gone_count}帧对象不足,"
-                                f"验证确认结束")
-                            break
+                        log.info(
+                            f"[📋 结束] 连续{obj_gone_count}帧对象不足,"
+                            f"直接判定结束")
+                        break
                 else:
                     if obj_gone_count > 3:
                         log.info(
@@ -1182,6 +1114,9 @@ class FishingBot:
                 self.input.safe_release()
                 time.sleep(0.3)
                 self.input.click()
+                self._wait_until_ui_gone(
+                    timeout=max(config.POST_CATCH_DELAY + 1.0, 3.0)
+                )
                 log.info("[🎣 收杆] 点击收杆后返回主循环重新抛竿")
                 return None
 
@@ -1220,6 +1155,12 @@ class FishingBot:
                     log.info("[🎣 收杆] 钓鱼成功, 点击收杆")
                 else:
                     log.info("[🎣 失败] 鱼竿已自动收回, 跳过收杆")
+
+                ui_gone = self._wait_until_ui_gone(
+                    timeout=max(config.POST_CATCH_DELAY + 1.0, 3.0)
+                )
+                if not ui_gone:
+                    log.warning("[⚠ UI] 收杆后上一轮小游戏UI未及时消失，已继续流程")
 
         return success
 

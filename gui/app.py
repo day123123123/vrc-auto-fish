@@ -22,30 +22,66 @@ from utils.logger import log
 
 # ═══════════════════════════════════════════════════════════
 #  可调参数定义
-#  (显示名, config属性名, 类型, 单位提示)
-#  类型: "int" / "float" / "ms" (毫秒显示,秒存储)
+#  分组格式:
+#  (分组名, 分组说明, [(显示名, config属性名, 类型, 单位提示), ...])
+#  类型: "int" / "float" / "ms" / "pct"
 # ═══════════════════════════════════════════════════════════
+PARAM_GROUPS = [
+    (
+        "基础节奏",
+        "控制抛竿、提竿、开局按压和每轮结束后的节奏。",
+        [
+            ("提竿时间(s)", "BITE_FORCE_HOOK", "float", "N 秒后提竿"),
+            ("按压时间(s)", "INITIAL_PRESS_TIME", "float", "小游戏正式接管时的开局按压时长"),
+            ("归正时间(s)", "POST_CATCH_DELAY", "float", "钓鱼结束或失败后等待多久再抛竿"),
+        ],
+    ),
+    (
+        "白条上升控制",
+        "白条上升太慢时优先调这里。上升慢: 先加大“最长按住”或“按住增益”; 上升过猛: 反向调小。",
+        [
+            ("最长按住(ms)", "HOLD_MAX_S", "ms", "单次按住的最大时长, 越大白条越容易上冲"),
+            ("按住增益", "HOLD_GAIN", "float", "鱼离中心越远, 会额外增加多少按住时长"),
+            ("前瞻时间(s)", "PREDICT_AHEAD", "float", "提前预测鱼的位置, 适合应对快速移动"),
+        ],
+    ),
+    (
+        "白条下降控制",
+        "白条下降太快、太飘、回落手感不对时调这里。下降太快兜不住: 先加大“抗重力基准”; 太悬浮: 调小它。",
+        [
+            ("抗重力基准(ms)", "HOLD_MIN_S", "ms", "基础托举力度, 越大白条越不容易快速下坠"),
+            ("速度阻尼", "SPEED_DAMPING", "float", "下坠快时自动补按, 上升快时自动减按"),
+            ("速度平滑", "VELOCITY_SMOOTH", "float", "速度估计平滑度, 越大越稳但反应略慢"),
+            ("死区(px)", "DEAD_ZONE", "int", "鱼靠近中心时允许的误差范围, 越大越不容易频繁点按"),
+        ],
+    ),
+    (
+        "识别与跟踪",
+        "识别不稳、经常跟丢、鱼条对不上时调这里。",
+        [
+            ("鱼像素大小", "FISH_GAME_SIZE", "int", "游戏内鱼图标的大致像素, 越小搜索倍率越高"),
+            ("最大距离(px)", "MAX_FISH_BAR_DIST", "int", "鱼和白条距离超过该值时视为误检"),
+            ("旋转阈值(°)", "TRACK_MIN_ANGLE", "float", "轨道倾斜超过此角度时启用旋转校正"),
+            ("旋转上限(°)", "TRACK_MAX_ANGLE", "float", "超过此角度通常视为误检, 如海平线"),
+            ("搜索上(px)", "REGION_UP", "int", "白条锁定后向上搜索的像素范围"),
+            ("搜索下(px)", "REGION_DOWN", "int", "白条锁定后向下搜索的像素范围"),
+            ("搜索X(px)", "REGION_X", "int", "白条中心左右各 N 像素范围内检测"),
+        ],
+    ),
+    (
+        "开始与结束判定",
+        "小游戏开始后的结束判定。连续丢失达到设定帧数后会直接结束，不再做二次验证。",
+        [
+            ("验证帧数", "VERIFY_FRAMES", "int", "主循环连续丢失达到多少帧后直接判定小游戏结束"),
+            ("成功阈值(%)", "SUCCESS_PROGRESS", "pct", "进度条超过此百分比判定钓鱼成功"),
+        ],
+    ),
+]
+
 TUNABLE_PARAMS = [
-    ("强制提竿(s)",   "BITE_FORCE_HOOK",  "float", "等待N秒无咬钩则强制提竿进入小游戏"),
-    ("鱼像素大小",    "FISH_GAME_SIZE",   "int",   "游戏内鱼图标的大致像素,越小搜索倍率越高"),
-    ("死区(px)",      "DEAD_ZONE",        "int",   "越大越容易触发按住"),
-    ("抗重力基准(ms)","HOLD_MIN_S",       "ms",    "越小下降越快,越大越悬浮"),
-    ("最长按住(ms)",  "HOLD_MAX_S",       "ms",    "单次按住的最大时长"),
-    ("按住增益",      "HOLD_GAIN",        "float", "位置误差×增益=额外按住时长"),
-    ("前瞻时间(s)",   "PREDICT_AHEAD",    "float", "预测未来位置的时间"),
-    ("速度阻尼",      "SPEED_DAMPING",    "float", "下坠快加按住,上升快减按住"),
-    ("最大距离(px)",  "MAX_FISH_BAR_DIST","int",   "鱼条距离超过视为误检"),
-    ("速度平滑",      "VELOCITY_SMOOTH",  "float", "0~1, 越大越平滑"),
-    ("旋转阈值(°)",   "TRACK_MIN_ANGLE",  "float", "轨道倾斜超过此角度启用旋转"),
-    ("旋转上限(°)",   "TRACK_MAX_ANGLE",  "float", "超过此角度视为误检(如海平线)"),
-    ("搜索上(px)",    "REGION_UP",        "int",   "白条锁定后向上搜索的像素数"),
-    ("搜索下(px)",    "REGION_DOWN",      "int",   "白条锁定后向下搜索的像素数"),
-    ("搜索X(px)",     "REGION_X",         "int",   "白条中心左右各N像素范围内检测"),
-    ("归正时间(s)",   "POST_CATCH_DELAY", "float", "钓鱼结束/失败后等待N秒再抛竿"),
-    ("按压时间(s)",   "INITIAL_PRESS_TIME","float", "开局按压时长(开局延迟0.5s固定)"),
-    ("确认帧数",      "VERIFY_CONSECUTIVE","int",   "连续几帧检测到UI才确认小游戏开始"),
-    ("验证帧数",      "VERIFY_FRAMES",    "int",   "验证小游戏钓上鱼后是否存在的最大检测帧数，太短可能会因为有几帧没识别到动而误判，太长会导致钓鱼后卡顿"),
-    ("成功阈值(%)",   "SUCCESS_PROGRESS", "pct",   "进度条超过此百分比判定钓鱼成功"),
+    item
+    for _, _, items in PARAM_GROUPS
+    for item in items
 ]
 
 
@@ -55,10 +91,8 @@ class FishingApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("VRC auto fish 263302")
-        self.root.geometry("580x800")
         self.root.resizable(True, True)
-        self.root.minsize(520, 600)
-        # ★ 默认不置顶 (用户可通过复选框开启)
+        self.root.minsize(520, 400)
         self.root.attributes("-topmost", False)
 
         # ── 机器人实例 ──
@@ -73,6 +107,9 @@ class FishingApp:
 
         # ── 加载上次保存的参数 ──
         self._load_settings()
+
+        # ── 自适应窗口尺寸 ──
+        self._auto_resize()
 
         # ── 预加载 YOLO ──
         if self.bot.yolo is None:
@@ -91,132 +128,150 @@ class FishingApp:
 
         self._log_msg("GitHub: https://github.com/day123123123/vrc-auto-fish")
 
+    def _auto_resize(self):
+        """根据内容自适应窗口大小，不超过屏幕可用高度"""
+        self.root.update_idletasks()
+        req_w = max(self.root.winfo_reqwidth(), 580)
+        req_h = self.root.winfo_reqheight()
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        max_h = screen_h - 80
+        final_h = min(req_h + 60, max_h)
+        x = (screen_w - req_w) // 2
+        y = max((screen_h - final_h) // 2, 0)
+        self.root.geometry(f"{req_w}x{final_h}+{x}+{y}")
+
     # ══════════════════════════════════════════════════════
     #  界面构建
     # ══════════════════════════════════════════════════════
 
     def _build_ui(self):
-        pad = {"padx": 10, "pady": 5}
+        pad = {"padx": 6, "pady": 2}
 
-        # ── 顶部：状态面板 ──
+        # ── 状态面板（紧凑2行） ──
         frm_status = ttk.LabelFrame(self.root, text=" 状态 ")
         frm_status.pack(fill="x", **pad)
 
-        grid_pad = {"padx": 8, "pady": 3, "sticky": "w"}
+        gpad = {"padx": 6, "pady": 1, "sticky": "w"}
 
         self.var_state = tk.StringVar(value="就绪")
         self.var_window = tk.StringVar(value="未连接")
         self.var_count = tk.StringVar(value="0")
         self.var_debug = tk.StringVar(value="关闭")
 
-        ttk.Label(frm_status, text="运行状态:").grid(row=0, column=0, **grid_pad)
+        ttk.Label(frm_status, text="状态:").grid(row=0, column=0, **gpad)
         self.lbl_state = ttk.Label(frm_status, textvariable=self.var_state,
                                    foreground="gray")
-        self.lbl_state.grid(row=0, column=1, **grid_pad)
-
-        ttk.Label(frm_status, text="VRChat窗口:").grid(row=1, column=0, **grid_pad)
-        self.lbl_window = ttk.Label(frm_status, textvariable=self.var_window)
-        self.lbl_window.grid(row=1, column=1, **grid_pad)
-
-        ttk.Label(frm_status, text="钓鱼次数:").grid(row=2, column=0, **grid_pad)
+        self.lbl_state.grid(row=0, column=1, **gpad)
+        ttk.Label(frm_status, text="次数:").grid(
+            row=0, column=2, padx=(16, 4), pady=1, sticky="w")
         ttk.Label(frm_status, textvariable=self.var_count).grid(
-            row=2, column=1, **grid_pad)
-
-        ttk.Label(frm_status, text="调试模式:").grid(row=3, column=0, **grid_pad)
+            row=0, column=3, **gpad)
+        ttk.Label(frm_status, text="调试:").grid(
+            row=0, column=4, padx=(16, 4), pady=1, sticky="w")
         ttk.Label(frm_status, textvariable=self.var_debug).grid(
-            row=3, column=1, **grid_pad)
+            row=0, column=5, **gpad)
 
-        # ── 中间：控制按钮 ──
-        frm_ctrl = ttk.Frame(self.root)
-        frm_ctrl.pack(fill="x", **pad)
+        ttk.Label(frm_status, text="窗口:").grid(row=1, column=0, **gpad)
+        self.lbl_window = ttk.Label(frm_status, textvariable=self.var_window)
+        self.lbl_window.grid(row=1, column=1, columnspan=5, **gpad)
 
-        self.btn_start = ttk.Button(frm_ctrl, text="▶ 开始 (F9)",
-                                    command=self._on_start, width=15)
-        self.btn_start.pack(side="left", padx=5)
+        # ── 按钮区（两行紧凑排列） ──
+        frm_btn = ttk.Frame(self.root)
+        frm_btn.pack(fill="x", **pad)
 
-        self.btn_stop = ttk.Button(frm_ctrl, text="■ 停止 (F10)",
-                                   command=self._on_stop, width=15,
+        row1 = ttk.Frame(frm_btn)
+        row1.pack(fill="x")
+        self.btn_start = ttk.Button(row1, text="▶ 开始(F9)",
+                                    command=self._on_start, width=12)
+        self.btn_start.pack(side="left", padx=2, pady=1)
+        self.btn_stop = ttk.Button(row1, text="■ 停止(F10)",
+                                   command=self._on_stop, width=12,
                                    state="disabled")
-        self.btn_stop.pack(side="left", padx=5)
+        self.btn_stop.pack(side="left", padx=2, pady=1)
+        self.btn_debug = ttk.Button(row1, text="调试(F11)",
+                                    command=self._on_toggle_debug, width=10)
+        self.btn_debug.pack(side="left", padx=2, pady=1)
+        self.btn_connect = ttk.Button(row1, text="🔗 连接窗口",
+                                      command=self._on_connect, width=12)
+        self.btn_connect.pack(side="left", padx=2, pady=1)
 
-        self.btn_debug = ttk.Button(frm_ctrl, text="调试模式 (F11)",
-                                    command=self._on_toggle_debug, width=15)
-        self.btn_debug.pack(side="left", padx=5)
+        row2 = ttk.Frame(frm_btn)
+        row2.pack(fill="x")
+        self.btn_screenshot = ttk.Button(row2, text="📸 截图",
+                                         command=self._on_screenshot, width=8)
+        self.btn_screenshot.pack(side="left", padx=2, pady=1)
+        self.btn_clearlog = ttk.Button(row2, text="🗑 清日志",
+                                       command=self._on_clear_log, width=8)
+        self.btn_clearlog.pack(side="left", padx=2, pady=1)
+        self.btn_whitelist = ttk.Button(row2, text="🐟 白名单",
+                                        command=self._on_whitelist, width=8)
+        self.btn_whitelist.pack(side="left", padx=2, pady=1)
+        self.btn_roi = ttk.Button(row2, text="📐 框选区域",
+                                  command=self._on_select_roi, width=10)
+        self.btn_roi.pack(side="left", padx=2, pady=1)
+        self.btn_clear_roi = ttk.Button(row2, text="✕ 清除区域",
+                                        command=self._on_clear_roi, width=10)
+        self.btn_clear_roi.pack(side="left", padx=2, pady=1)
 
-        # ── 辅助按钮 ──
-        frm_aux = ttk.Frame(self.root)
-        frm_aux.pack(fill="x", **pad)
-
-        self.btn_connect = ttk.Button(frm_aux, text="🔗 连接窗口",
-                                      command=self._on_connect, width=15)
-        self.btn_connect.pack(side="left", padx=5)
-
-        self.btn_screenshot = ttk.Button(frm_aux, text="📸 保存截图",
-                                         command=self._on_screenshot, width=15)
-        self.btn_screenshot.pack(side="left", padx=5)
-
-        self.btn_clearlog = ttk.Button(frm_aux, text="🗑 清空日志",
-                                       command=self._on_clear_log, width=12)
-        self.btn_clearlog.pack(side="left", padx=5)
-
-        self.btn_whitelist = ttk.Button(frm_aux, text="🐟 白名单",
-                                        command=self._on_whitelist, width=12)
-        self.btn_whitelist.pack(side="left", padx=5)
-
-        # ── 开关选项（独立一行，防窗口太窄时被挤掉） ──
+        # ── 开关选项 + ROI 状态 ──
         frm_toggles = ttk.Frame(self.root)
         frm_toggles.pack(fill="x", **pad)
 
         self.var_topmost = tk.BooleanVar(value=False)
         ttk.Checkbutton(frm_toggles, text="窗口置顶",
                         variable=self.var_topmost,
-                        command=self._on_topmost).pack(side="left", padx=5)
+                        command=self._on_topmost).pack(side="left", padx=4)
 
         self.var_show_debug = tk.BooleanVar(value=config.SHOW_DEBUG)
         ttk.Checkbutton(frm_toggles, text="Debug窗口",
                         variable=self.var_show_debug,
-                        command=self._on_debug_toggle).pack(side="left", padx=5)
+                        command=self._on_debug_toggle).pack(side="left", padx=4)
 
-        self.var_skip_success = tk.BooleanVar(value=getattr(config, "SKIP_SUCCESS_CHECK", False))
+        self.var_skip_success = tk.BooleanVar(
+            value=getattr(config, "SKIP_SUCCESS_CHECK", False))
         chk_skip = ttk.Checkbutton(frm_toggles, text="跳过成功检查",
                                    variable=self.var_skip_success,
                                    command=self._on_skip_success_toggle)
-        chk_skip.pack(side="left", padx=5)
+        chk_skip.pack(side="left", padx=4)
         self._create_tooltip(chk_skip,
             "启用后不再检测成功阈值，无论成功失败都点击两次收杆。\n"
             "因为游戏成功需要点一次才能收杆，失败则不用点。\n"
             "很多人反馈在成功判定处卡住，开启此选项可避免。")
 
-        # ── 防卡杆 ──
+        ttk.Label(frm_toggles, text="区域:").pack(side="left", padx=(10, 2))
+        self.var_roi = tk.StringVar(value="未设置 (全屏搜索)")
+        self.lbl_roi = ttk.Label(frm_toggles, textvariable=self.var_roi,
+                                 foreground="gray")
+        self.lbl_roi.pack(side="left")
+
+        # ── 防卡杆（紧凑单行） ──
         frm_anti = ttk.LabelFrame(self.root, text=" 防卡杆（需要开启OSC） ")
         frm_anti.pack(fill="x", **pad)
 
-        row_mode = ttk.Frame(frm_anti)
-        row_mode.pack(fill="x", padx=5, pady=2)
+        row_anti = ttk.Frame(frm_anti)
+        row_anti.pack(fill="x", padx=4, pady=2)
 
         self.var_anti_mode = tk.StringVar(
             value=getattr(config, "ANTI_STUCK_MODE", "shake"))
-        rb_shake = ttk.Radiobutton(row_mode, text="摇头",
+        rb_shake = ttk.Radiobutton(row_anti, text="摇头",
                                    variable=self.var_anti_mode, value="shake",
                                    command=self._on_anti_mode_change)
-        rb_shake.pack(side="left", padx=5)
+        rb_shake.pack(side="left", padx=4)
         self._create_tooltip(rb_shake, "抛竿前通过OSC左右摇头，防止长时间挂机卡杆")
 
-        rb_jump = ttk.Radiobutton(row_mode, text="跳跃",
-                                   variable=self.var_anti_mode, value="jump",
-                                   command=self._on_anti_mode_change)
-        rb_jump.pack(side="left", padx=5)
+        rb_jump = ttk.Radiobutton(row_anti, text="跳跃",
+                                  variable=self.var_anti_mode, value="jump",
+                                  command=self._on_anti_mode_change)
+        rb_jump.pack(side="left", padx=4)
         self._create_tooltip(rb_jump,
             "抛竿前通过OSC发送/input/Jump，跳一下防卡杆\n"
             "和摇头一样纯OSC通信，不需要聚焦窗口")
 
-        row_params = ttk.Frame(frm_anti)
-        row_params.pack(fill="x", padx=5, pady=2)
-
-        ttk.Label(row_params, text="摇头时长(s)").pack(side="left", padx=(5, 2))
+        ttk.Label(row_anti, text="摇头时长(s)").pack(side="left", padx=(12, 2))
         self.var_shake_time = tk.StringVar(
             value=f"{config.SHAKE_HEAD_TIME:.3f}")
-        ent_shake = ttk.Entry(row_params, textvariable=self.var_shake_time,
+        ent_shake = ttk.Entry(row_anti, textvariable=self.var_shake_time,
                               width=6, justify="center")
         ent_shake.pack(side="left", padx=2)
         ent_shake.bind("<Return>", lambda e: self._apply_anti_params())
@@ -228,15 +283,15 @@ class FishingApp:
         frm_yolo.pack(fill="x", **pad)
 
         config.USE_YOLO = True
-        ttk.Label(frm_yolo, text="YOLO 已启用").pack(side="left", padx=5)
+        ttk.Label(frm_yolo, text="YOLO 已启用").pack(side="left", padx=4)
 
         self.var_yolo_collect = tk.BooleanVar(value=config.YOLO_COLLECT)
         ttk.Checkbutton(frm_yolo, text="采集数据",
                         variable=self.var_yolo_collect,
                         command=self._on_yolo_collect_toggle).pack(
-                            side="left", padx=5)
+                            side="left", padx=4)
 
-        ttk.Label(frm_yolo, text="设备:").pack(side="left", padx=(10, 2))
+        ttk.Label(frm_yolo, text="设备:").pack(side="left", padx=(8, 2))
         self.var_yolo_device = tk.StringVar(value=config.YOLO_DEVICE)
         cmb_dev = ttk.Combobox(frm_yolo, textvariable=self.var_yolo_device,
                                values=["auto", "cpu", "gpu"],
@@ -247,27 +302,7 @@ class FishingApp:
         self.var_yolo_status = tk.StringVar(value="")
         self._update_yolo_status()
         ttk.Label(frm_yolo, textvariable=self.var_yolo_status,
-                  foreground="gray").pack(side="left", padx=10)
-
-        # ── 检测区域框选 ──
-        frm_roi = ttk.Frame(self.root)
-        frm_roi.pack(fill="x", **pad)
-
-        self.btn_roi = ttk.Button(frm_roi, text="📐 框选检测区域",
-                                  command=self._on_select_roi, width=15)
-        self.btn_roi.pack(side="left", padx=5)
-
-        self.btn_clear_roi = ttk.Button(frm_roi, text="✕ 清除区域",
-                                        command=self._on_clear_roi, width=12)
-        self.btn_clear_roi.pack(side="left", padx=5)
-
-        self.var_roi = tk.StringVar(value="未设置 (全屏搜索)")
-        ttk.Label(frm_roi, text="检测区域:").pack(side="left", padx=(10, 2))
-        self.lbl_roi = ttk.Label(frm_roi, textvariable=self.var_roi,
-                                 foreground="gray")
-        self.lbl_roi.pack(side="left")
-
-        # (行为克隆 UI 已移除)
+                  foreground="gray").pack(side="left", padx=8)
 
         # ── 参数调节面板 ──
         self._build_params_panel(pad)
@@ -277,12 +312,12 @@ class FishingApp:
         frm_log.pack(fill="both", expand=True, **pad)
 
         self.txt_log = scrolledtext.ScrolledText(
-            frm_log, height=14, state="disabled",
+            frm_log, height=10, state="disabled",
             font=("Consolas", 9), wrap="word",
             bg="#1e1e1e", fg="#d4d4d4",
             insertbackground="#d4d4d4",
         )
-        self.txt_log.pack(fill="both", expand=True, padx=5, pady=5)
+        self.txt_log.pack(fill="both", expand=True, padx=4, pady=4)
 
     # ══════════════════════════════════════════════════════
     #  参数调节面板
@@ -293,46 +328,56 @@ class FishingApp:
         frm = ttk.LabelFrame(self.root, text=" 小游戏参数 (实时生效) ")
         frm.pack(fill="x", **pad)
 
-        # 4列布局: [标签 输入框] [标签 输入框]
+        notebook = ttk.Notebook(frm)
+        notebook.pack(fill="x", expand=True, padx=4, pady=3)
+
         cols_per_row = 2
-        gpad = {"padx": 4, "pady": 2}
+        gpad = {"padx": 3, "pady": 2}
 
-        for i, (label, attr, vtype, tip) in enumerate(TUNABLE_PARAMS):
-            row = i // cols_per_row
-            col_base = (i % cols_per_row) * 3   # 每组占3列: label, entry, unit
+        for group_name, group_help, items in PARAM_GROUPS:
+            tab = ttk.Frame(notebook)
+            notebook.add(tab, text=group_name)
 
-            # 从 config 读取当前值并转换为显示值
-            display_val = self._config_to_display(attr, vtype)
-            var = tk.StringVar(value=display_val)
-            self._param_vars[attr] = (var, vtype)
+            lbl_help = ttk.Label(
+                tab,
+                text=group_help,
+                foreground="gray",
+                justify="left",
+                wraplength=520,
+            )
+            lbl_help.pack(fill="x", padx=6, pady=(4, 2))
 
-            # 标签
-            lbl = ttk.Label(frm, text=label, width=12, anchor="e")
-            lbl.grid(row=row, column=col_base, sticky="e", **gpad)
+            grid = ttk.Frame(tab)
+            grid.pack(fill="x", padx=4, pady=(0, 4))
 
-            # 输入框
-            entry = ttk.Entry(frm, textvariable=var, width=8,
-                              justify="center")
-            entry.grid(row=row, column=col_base + 1, sticky="w", **gpad)
+            for i, (label, attr, vtype, tip) in enumerate(items):
+                row = i // cols_per_row
+                col_base = (i % cols_per_row) * 2
 
-            # 绑定回车和失焦自动应用
-            entry.bind("<Return>", lambda e: self._apply_params())
-            entry.bind("<FocusOut>", lambda e: self._apply_params())
+                display_val = self._config_to_display(attr, vtype)
+                var = tk.StringVar(value=display_val)
+                self._param_vars[attr] = (var, vtype)
 
-            # 提示 (鼠标悬停)
-            if tip:
-                self._create_tooltip(entry, tip)
+                lbl = ttk.Label(grid, text=label, width=12, anchor="e")
+                lbl.grid(row=row, column=col_base, sticky="e", **gpad)
 
-        # 按钮行
-        total_rows = (len(TUNABLE_PARAMS) + cols_per_row - 1) // cols_per_row
+                entry = ttk.Entry(grid, textvariable=var, width=8,
+                                  justify="center")
+                entry.grid(row=row, column=col_base + 1, sticky="w", **gpad)
+
+                entry.bind("<Return>", lambda e: self._apply_params())
+                entry.bind("<FocusOut>", lambda e: self._apply_params())
+
+                if tip:
+                    self._create_tooltip(entry, tip)
+
         btn_frame = ttk.Frame(frm)
-        btn_frame.grid(row=total_rows, column=0, columnspan=6,
-                       pady=(5, 5), sticky="e", padx=10)
+        btn_frame.pack(fill="x", padx=6, pady=(0, 4))
 
         ttk.Button(btn_frame, text="应用参数",
-                   command=self._apply_params, width=10).pack(side="left", padx=3)
+                   command=self._apply_params, width=10).pack(side="right", padx=2)
         ttk.Button(btn_frame, text="恢复默认",
-                   command=self._reset_params, width=10).pack(side="left", padx=3)
+                   command=self._reset_params, width=10).pack(side="right", padx=2)
 
     def _config_to_display(self, attr: str, vtype: str) -> str:
         """将 config 值转换为 GUI 显示值"""
@@ -419,7 +464,6 @@ class FishingApp:
             "REGION_X":         100,
             "POST_CATCH_DELAY": 3.0,
             "INITIAL_PRESS_TIME": 0.2,
-            "VERIFY_CONSECUTIVE": 1,
             "VERIFY_FRAMES": 5,
             "SUCCESS_PROGRESS": 0.55,
         }
