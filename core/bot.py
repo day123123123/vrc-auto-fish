@@ -237,15 +237,16 @@ class FishingBot:
         return False
 
     def _verify_game_alive(self) -> bool:
-        """快速检查小游戏UI是否仍然存在 (5帧, 无延迟)。
+        """快速检查小游戏UI是否仍然存在 (无延迟)。
         用于游戏结束条件触发后的二次确认。"""
-        for i in range(5):
+        n = getattr(config, "VERIFY_FRAMES", 5)
+        for i in range(n):
             if not self.running:
                 return False
             screen = self._grab()
             self._show_debug_overlay(
                 screen,
-                status_text=f"🔍 验证小游戏 ({i+1}/5)")
+                status_text=f"🔍 验证小游戏 ({i+1}/{n})")
             if self._detect_ui_once(screen):
                 return True
             time.sleep(0.03)
@@ -288,7 +289,7 @@ class FishingBot:
         hit_count = 0
         required = config.VERIFY_CONSECUTIVE
         total_frames = 0
-        max_frames = 15
+        max_frames = getattr(config, "VERIFY_FRAMES", 5)
 
         self._track_angle = 0.0
         self._need_rotation = False

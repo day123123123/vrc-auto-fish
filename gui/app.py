@@ -44,6 +44,7 @@ TUNABLE_PARAMS = [
     ("归正时间(s)",   "POST_CATCH_DELAY", "float", "钓鱼结束/失败后等待N秒再抛竿"),
     ("按压时间(s)",   "INITIAL_PRESS_TIME","float", "开局按压时长(开局延迟0.5s固定)"),
     ("确认帧数",      "VERIFY_CONSECUTIVE","int",   "连续几帧检测到UI才确认小游戏开始"),
+    ("验证帧数",      "VERIFY_FRAMES",    "int",   "验证小游戏钓上鱼后是否存在的最大检测帧数，太短可能会因为有几帧没识别到动而误判，太长会导致钓鱼后卡顿"),
     ("成功阈值(%)",   "SUCCESS_PROGRESS", "pct",   "进度条超过此百分比判定钓鱼成功"),
 ]
 
@@ -419,6 +420,7 @@ class FishingApp:
             "POST_CATCH_DELAY": 3.0,
             "INITIAL_PRESS_TIME": 0.2,
             "VERIFY_CONSECUTIVE": 1,
+            "VERIFY_FRAMES": 5,
             "SUCCESS_PROGRESS": 0.55,
         }
 

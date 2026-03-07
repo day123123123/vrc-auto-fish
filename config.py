@@ -40,6 +40,7 @@ HOOK_PRE_DELAY      = 0.1         # 提竿前延迟 (★ 0.2→0.1)
 HOOK_POST_DELAY     = 0.4         # 提竿后等待 UI 出现 (★ 0.3→0.4)
 VERIFY_TIMEOUT      = 3.0         # 提竿后验证小游戏出现的超时(秒)
 VERIFY_CONSECUTIVE  = 1           # ★ 累计N帧检测到白条+轨道即确认
+VERIFY_FRAMES       = 5           # 验证小游戏存在的最大帧数
 GAME_LOOP_INTERVAL  = 0.005       # 小游戏循环间隔 (60FPS游戏, 尽量快)
 SHOW_DEBUG             = True     # 是否显示debug窗口 (关闭可提升性能)
 DEBUG_OVERLAY_INTERVAL = 0.033    # debug窗口最小刷新间隔(秒) ~30FPS
