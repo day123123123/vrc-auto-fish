@@ -49,7 +49,7 @@ PARAM_GROUPS = [
         "白条下降控制",
         "白条下降太快、太飘、回落手感不对时调这里。下降太快兜不住: 先加大“抗重力基准”; 太悬浮: 调小它。",
         [
-            ("抗重力基准(ms)", "HOLD_MIN_S", "ms", "基础托举力度, 越大白条越不容易快速下坠"),
+            ("最短按住/抗重力基准(ms)", "HOLD_MIN_S", "ms", "基础托举力度, 也是单次最短按住时长, 越大白条越不容易快速下坠"),
             ("速度阻尼", "SPEED_DAMPING", "float", "下坠快时自动补按, 上升快时自动减按"),
             ("速度平滑", "VELOCITY_SMOOTH", "float", "速度估计平滑度, 越大越稳但反应略慢"),
             ("死区(px)", "DEAD_ZONE", "int", "鱼靠近中心时允许的误差范围, 越大越不容易频繁点按"),
@@ -607,9 +607,9 @@ class FishingApp:
                 data["HOLD_GAIN"] = 0.040
             if data.get("SPEED_DAMPING", 0) > 0.001:
                 data["SPEED_DAMPING"] = 0.00025
-            if data.get("HOLD_MAX_S", 1) < 0.08:
+            # 允许用户保存更小的最长/最短按住，只拦截非正数这类明显异常值。
+            if data.get("HOLD_MAX_S", 1) <= 0:
                 data["HOLD_MAX_S"] = 0.100
-            # 允许用户保存更小的抗重力基准，只拦截非正数这类明显异常值。
             if data.get("HOLD_MIN_S", 1) <= 0:
                 data["HOLD_MIN_S"] = 0.025
 
