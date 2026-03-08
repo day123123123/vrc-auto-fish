@@ -116,6 +116,20 @@ class FishingBot:
         if config.IL_USE_MODEL:
             self._load_il_policy()
 
+        # ── 全局抢占小游戏 ──
+        self._force_minigame = False
+
+    def _tick_fps(self):
+        """在任意阶段更新调试窗口 FPS 统计。"""
+        now_t = time.time()
+        self._frame_times.append(now_t)
+        if len(self._frame_times) > 20:
+            self._frame_times = self._frame_times[-20:]
+        if len(self._frame_times) >= 2:
+            dt = self._frame_times[-1] - self._frame_times[0]
+            if dt > 0:
+                self._fps = (len(self._frame_times) - 1) / dt
+
     # ══════════════════════════════════════════════════════
     #  截取游戏画面
     # ══════════════════════════════════════════════════════
@@ -169,13 +183,26 @@ class FishingBot:
     #  第1步: 抛竿
     # ══════════════════════════════════════════════════════
 
+    def _set_minigame_preempt(self, reason: str):
+        """设置全局小游戏抢占标记。"""
+        if not self._force_minigame:
+            self._force_minigame = True
+            log.warning(f"[⚠ 抢占] {reason}，立即切入 PD 控制")
+
+    def _consume_minigame_preempt(self) -> bool:
+        """读取并清空小游戏抢占标记。"""
+        flag = self._force_minigame
+        self._force_minigame = False
+        return flag
+
     def _cast_rod(self):
         self.state = "抛竿中"
         if config.IL_RECORD:
             log.info("[🎣 抛竿] 录制模式 — 请手动抛竿 (点击鼠标)")
         else:
             self.input.click()
-            time.sleep(0.15)
+            if self._wait_with_minigame_preempt(0.15, "🎣 抛竿后摇杆等待"):
+                return True
             mode = getattr(config, "ANTI_STUCK_MODE", "shake")
             if mode == "jump":
                 log.info("[🎣 抛竿] 抛竿 → 跳跃防卡杆")
@@ -186,10 +213,11 @@ class FishingBot:
         # ★ 从抛竿开始就显示 debug 窗口
         try:
             screen = self._grab()
+            self._tick_fps()
             self._show_debug_overlay(screen, status_text="🎣 抛竿中...")
         except Exception:
             pass
-        time.sleep(config.CAST_DELAY)
+        return self._wait_with_minigame_preempt(config.CAST_DELAY, "🎣 抛竿冷却")
 
     # ══════════════════════════════════════════════════════
     #  第2步: 等待咬钩
@@ -244,6 +272,20 @@ class FishingBot:
 
         while self.running and time.time() - t0 < timeout:
             screen = self._grab()
+            self._tick_fps()
+            try:
+                ready, fish, bar, progress = self._detect_minigame_ready_now(screen)
+            except Exception:
+                ready, fish, bar, progress = False, None, None, None
+
+            if ready:
+                self._show_debug_overlay(
+                    screen, fish, bar, progress=progress,
+                    status_text="⚠ 已重新满足小游戏条件，抢占进入"
+                )
+                self._set_minigame_preempt(f"{self.state} 阶段检测到小游戏条件")
+                return False
+
             ui_found = self._detect_ui_once(screen)
             if ui_found:
                 clear_count = 0
@@ -263,25 +305,73 @@ class FishingBot:
 
         return False
 
+    def _detect_minigame_ready_now(self, screen):
+        """任意阶段检查是否已经满足进入小游戏控制的条件。"""
+        skip_success = getattr(config, "SKIP_SUCCESS_CHECK", False)
+        if config.USE_YOLO and self.yolo is None:
+            try:
+                self.yolo = _get_yolo_detector()
+            except Exception:
+                pass
+
+        if config.USE_YOLO and self.yolo is not None:
+            det = self.yolo.detect(screen, roi=config.DETECT_ROI or self._auto_roi)
+            fish = det.get("fish")
+            bar = det.get("bar")
+            progress = None if skip_success else det.get("progress")
+            ready = ((fish is not None)
+                     + (bar is not None)
+                     + (progress is not None)) >= 2
+            return ready, fish, bar, progress
+
+        search_region = config.DETECT_ROI or self._auto_roi
+        fish = self.detector.find_fish(
+            screen, config.THRESH_FISH, search_region=search_region)
+        bar = self.detector.find_multiscale(
+            screen, "bar", config.THRESH_BAR,
+            search_region=search_region, scales=config.BAR_SCALES)
+        ready = (fish is not None) and (bar is not None)
+        return ready, fish, bar, None
+
+    def _wait_with_minigame_preempt(self, duration, status_text):
+        """等待期间持续检测，若满足小游戏条件则立即抢占进入控制。"""
+        if self._force_minigame:
+            return True
+        t0 = time.time()
+        while self.running and time.time() - t0 < duration:
+            screen = self._grab()
+            self._tick_fps()
+            try:
+                ready, fish, bar, progress = self._detect_minigame_ready_now(screen)
+            except Exception:
+                ready, fish, bar, progress = False, None, None, None
+
+            remain = max(0.0, duration - (time.time() - t0))
+            self._show_debug_overlay(
+                screen, fish, bar, progress=progress,
+                status_text=f"{status_text} ({remain:.1f}s)"
+            )
+
+            if ready:
+                self._set_minigame_preempt(f"{self.state} 阶段已满足小游戏条件")
+                return True
+
+            time.sleep(0.05)
+
+        return False
+
     def _hook_fish(self):
         self.state = "提竿"
         if config.IL_RECORD:
             log.info("[🪝 提竿] 录制模式 — 请手动提竿 (点击鼠标)")
         else:
             log.info("[🪝 提竿] 点击鼠标提竿!")
-            time.sleep(config.HOOK_PRE_DELAY)
+            if self._wait_with_minigame_preempt(config.HOOK_PRE_DELAY, "🪝 提竿前等待"):
+                return True
             self.input.click()
         # ★ 提竿后短暂等待, 持续刷新 debug 窗口
-        t0 = time.time()
-        while time.time() - t0 < config.HOOK_POST_DELAY:
-            try:
-                screen = self._grab()
-                self._show_debug_overlay(
-                    screen, status_text="🪝 提竿! 等待小游戏UI..."
-                )
-            except Exception:
-                pass
-            time.sleep(0.05)
+        return self._wait_with_minigame_preempt(
+            config.HOOK_POST_DELAY, "🪝 提竿后等待小游戏UI")
 
     def _wait_for_minigame_ui(self) -> bool:
         """
@@ -295,6 +385,7 @@ class FishingBot:
 
         while self.running:
             screen = self._grab()
+            self._tick_fps()
             self._show_debug_overlay(
                 screen,
                 status_text=f"[IL] 等待小游戏... ({consecutive}/{required})"
@@ -329,7 +420,7 @@ class FishingBot:
                 consecutive = 0
                 logged = False
 
-            time.sleep(0.1)
+            time.sleep(0.05)
 
         return False
 
@@ -337,7 +428,7 @@ class FishingBot:
     #  第4步: 钓鱼小游戏
     # ══════════════════════════════════════════════════════
 
-    def _fishing_minigame(self) -> bool:
+    def _fishing_minigame(self, start_in_minigame=False) -> bool:
         """返回 True=成功, False=失败/停止, None=验证失败需重试"""
 
         # ── 行为克隆: 每局重置状态 ──
@@ -355,10 +446,11 @@ class FishingBot:
             except Exception as e:
                 log.warning(f"[YOLO] 加载失败: {e}，回退到模板匹配")
         _use_yolo = config.USE_YOLO and self.yolo is not None
+        _skip_success_check = getattr(config, "SKIP_SUCCESS_CHECK", False)
 
         # ═══════ Phase 1: 等待期间持续检测, 支持提前切入小游戏 ═══════
-        _entered_minigame_early = False
-        if not config.IL_RECORD:
+        _entered_minigame_early = start_in_minigame
+        if not config.IL_RECORD and not start_in_minigame:
             wait_s = config.BITE_FORCE_HOOK
             log.info(f"[⏳ 等待] 等待 {wait_s:.0f}s 后提竿, 同时运行检测...")
             _wait_t0 = time.time()
@@ -369,6 +461,7 @@ class FishingBot:
                     break
                 try:
                     _wait_screen = self._grab()
+                    self._tick_fps()
                     _pre_fish, _pre_bar = None, None
                     _pre_progress = None
                     if _use_yolo:
@@ -404,13 +497,14 @@ class FishingBot:
                             break
                 except Exception:
                     pass
-                time.sleep(0.2)
+                time.sleep(0.05)
 
             if not self.running:
                 return False
 
             if not _entered_minigame_early:
-                self._hook_fish()
+                if self._hook_fish():
+                    _entered_minigame_early = True
                 if not self.running:
                     return False
 
@@ -551,15 +645,7 @@ class FishingBot:
         try:
             while self.running:
                 frame += 1
-                # ★ FPS 计算
-                now_t = time.time()
-                self._frame_times.append(now_t)
-                if len(self._frame_times) > 20:
-                    self._frame_times = self._frame_times[-20:]
-                if len(self._frame_times) >= 2:
-                    dt = self._frame_times[-1] - self._frame_times[0]
-                    if dt > 0:
-                        self._fps = (len(self._frame_times) - 1) / dt
+                self._tick_fps()
 
                 screen_raw = self._grab()
                 screen = self._rotate_for_detection(screen_raw) \
@@ -643,7 +729,8 @@ class FishingBot:
                     _ydet = self.yolo.detect(screen, roi=_yolo_roi)
                     fish = _ydet["fish"]
                     bar = _ydet["bar"]
-                    _yolo_progress = _ydet.get("progress")
+                    if not _skip_success_check:
+                        _yolo_progress = _ydet.get("progress")
                     if fish is not None:
                         _save = not _fish_id_saved
                         _color_key = self.detector.identify_fish_type(
@@ -884,7 +971,7 @@ class FishingBot:
                     self._show_debug_overlay(
                         screen_raw, fish, bar, _display_sr,
                         bar_search_region=bar_search_region,
-                        progress=_yolo_progress,
+                        progress=None if _skip_success_check else _yolo_progress,
                         status_text=f"🐟 小游戏 F{frame:04d}"
                     )
                 else:
@@ -892,7 +979,7 @@ class FishingBot:
                         screen_raw,
                         search_region=_display_sr,
                         bar_search_region=bar_search_region,
-                        progress=_yolo_progress,
+                        progress=None if _skip_success_check else _yolo_progress,
                         status_text=f"🐟 小游戏 F{frame:04d} (旋转{self._track_angle:.0f}°补偿中)"
                     )
 
@@ -926,7 +1013,9 @@ class FishingBot:
 
                 # ════════════ 进度条 (记录进度, 不直接判定结束) ════════════
                 green = 0.0
-                if frame <= _PROGRESS_SKIP_FRAMES:
+                if _skip_success_check:
+                    pass
+                elif frame <= _PROGRESS_SKIP_FRAMES:
                     pass
                 elif _use_yolo and _yolo_progress is not None:
                     px, py, pw, ph = _yolo_progress[:4]
@@ -1102,17 +1191,24 @@ class FishingBot:
                           if fish else "鱼=无")
                     bi = f"条Y={bar[1]+bar[3]//2}" if bar else "条=无"
                     vel = f"v={self._bar_velocity:+.0f}"
-                    log.info(
-                        f"[F{frame:04d}] {fi} | {bi} | {vel} | "
-                        f"按住:{hold_count} | 进度:{green:.0%}"
-                    )
+                    if _skip_success_check:
+                        log.info(
+                            f"[F{frame:04d}] {fi} | {bi} | {vel} | "
+                            f"按住:{hold_count}"
+                        )
+                    else:
+                        log.info(
+                            f"[F{frame:04d}] {fi} | {bi} | {vel} | "
+                            f"按住:{hold_count} | 进度:{green:.0%}"
+                        )
 
                 time.sleep(config.GAME_LOOP_INTERVAL)
 
         finally:
             if _hook_timeout_retry:
                 self.input.safe_release()
-                time.sleep(0.3)
+                if self._wait_with_minigame_preempt(0.3, "⏳ 收杆前等待"):
+                    return None
                 self.input.click()
                 self._wait_until_ui_gone(
                     timeout=max(config.POST_CATCH_DELAY + 1.0, 3.0)
@@ -1122,9 +1218,15 @@ class FishingBot:
 
             if _skip_fish:
                 success = False
-                log.info(
-                    f"[⏭ 跳过] 非目标鱼, 已放弃 (进度 {_last_green:.0%} 不计)"
-                )
+                if _skip_success_check:
+                    log.info("[⏭ 跳过] 非目标鱼, 已放弃")
+                else:
+                    log.info(
+                        f"[⏭ 跳过] 非目标鱼, 已放弃 (进度 {_last_green:.0%} 不计)"
+                    )
+            elif _skip_success_check:
+                success = True
+                log.info("[✅ 完成] 已跳过成功检查，不再判定最终进度")
             elif _last_green > config.SUCCESS_PROGRESS:
                 success = True
                 log.info(
@@ -1142,15 +1244,18 @@ class FishingBot:
                 log.info("[🎣 收杆] 录制模式 — 请手动收杆")
             else:
                 self.input.safe_release()
-                time.sleep(0.5)
+                if self._wait_with_minigame_preempt(0.5, "⏳ 收杆准备"):
+                    return success
 
                 if getattr(config, "SKIP_SUCCESS_CHECK", False):
-                    time.sleep(0.2)
+                    if self._wait_with_minigame_preempt(0.2, "⏳ 收杆点击前等待"):
+                        return success
                     self.input.click()
                     log.info("[🎣 收杆] 跳过成功检查, 点击收杆")
                     success = True
                 elif success:
-                    time.sleep(0.2)
+                    if self._wait_with_minigame_preempt(0.2, "⏳ 收杆点击前等待"):
+                        return success
                     self.input.click()
                     log.info("[🎣 收杆] 钓鱼成功, 点击收杆")
                 else:
@@ -1159,7 +1264,7 @@ class FishingBot:
                 ui_gone = self._wait_until_ui_gone(
                     timeout=max(config.POST_CATCH_DELAY + 1.0, 3.0)
                 )
-                if not ui_gone:
+                if not ui_gone and not self._force_minigame:
                     log.warning("[⚠ UI] 收杆后上一轮小游戏UI未及时消失，已继续流程")
 
         return success
@@ -1851,24 +1956,27 @@ class FishingBot:
 
         while self.running:
             try:
+                force_minigame = self._consume_minigame_preempt()
                 if config.IL_RECORD:
                     # ★ 录制模式: 用户手动操作, 程序等待小游戏UI出现
                     self.state = "录制: 等待小游戏"
                     log.info("[IL] 请手动抛竿→等待→提竿, 程序在等待小游戏出现...")
                     if not self._wait_for_minigame_ui():
                         break
-                else:
-                    self._cast_rod()
+                elif not force_minigame:
+                    force_minigame = self._cast_rod() or self._consume_minigame_preempt()
                     if not self.running:
                         break
 
                 if not self.running:
                     break
 
-                result = self._fishing_minigame()
+                result = self._fishing_minigame(start_in_minigame=force_minigame)
 
                 if result is None:
-                    time.sleep(config.POST_CATCH_DELAY)
+                    self.state = "等待重抛"
+                    self._wait_with_minigame_preempt(
+                        config.POST_CATCH_DELAY, "⏳ 等待重抛")
                     log.info("─" * 40)
                     continue
 
@@ -1878,13 +1986,14 @@ class FishingBot:
                 log.info("─" * 40)
 
                 self.state = "等待下一轮"
-                time.sleep(config.POST_CATCH_DELAY)
+                self._wait_with_minigame_preempt(
+                    config.POST_CATCH_DELAY, "⏳ 等待下一轮")
 
             except Exception as e:
                 log.error(f"运行异常: {e}")
                 if not config.IL_RECORD:
                     self.input.safe_release()
-                time.sleep(2)
+                self._wait_with_minigame_preempt(2.0, "⚠ 异常恢复等待")
 
         if not config.IL_RECORD:
             self.input.safe_release()

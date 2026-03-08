@@ -101,6 +101,7 @@ class FishingApp:
 
         # ── 参数变量 ──
         self._param_vars = {}        # config属性名 → tk.StringVar
+        self._param_entries = {}     # config属性名 → ttk.Entry
 
         # ── 构建界面 ──
         self._build_ui()
@@ -325,10 +326,54 @@ class FishingApp:
 
     def _build_params_panel(self, pad):
         """构建小游戏参数实时调节面板"""
-        frm = ttk.LabelFrame(self.root, text=" 小游戏参数 (实时生效) ")
-        frm.pack(fill="x", **pad)
+        self.frm_params = ttk.LabelFrame(self.root, text=" 小游戏参数 (实时生效) ")
+        self.frm_params.pack(fill="x", **pad)
 
-        notebook = ttk.Notebook(frm)
+        header = ttk.Frame(self.frm_params)
+        header.pack(fill="x", padx=6, pady=(4, 0))
+
+        self.var_grouped_params = tk.BooleanVar(value=True)
+        chk_layout = ttk.Checkbutton(
+            header,
+            text="新版分类界面",
+            variable=self.var_grouped_params,
+            command=self._on_params_layout_toggle,
+        )
+        chk_layout.pack(side="right")
+        self._create_tooltip(
+            chk_layout,
+            "开启: 使用新版分类参数界面\n关闭: 使用旧版平铺参数界面",
+        )
+
+        self.frm_params_body = ttk.Frame(self.frm_params)
+        self.frm_params_body.pack(fill="x", expand=True)
+        self._render_params_panel()
+
+    def _render_params_panel(self):
+        """根据当前开关渲染新版/旧版参数界面"""
+        for child in self.frm_params_body.winfo_children():
+            child.destroy()
+
+        self._param_vars = {}
+        self._param_entries = {}
+
+        if self.var_grouped_params.get():
+            self._render_grouped_params_panel()
+        else:
+            self._render_legacy_params_panel()
+
+        self._update_success_threshold_state()
+
+        btn_frame = ttk.Frame(self.frm_params_body)
+        btn_frame.pack(fill="x", padx=6, pady=(0, 4))
+
+        ttk.Button(btn_frame, text="应用参数",
+                   command=self._apply_params, width=10).pack(side="right", padx=2)
+        ttk.Button(btn_frame, text="恢复默认",
+                   command=self._reset_params, width=10).pack(side="right", padx=2)
+
+    def _render_grouped_params_panel(self):
+        notebook = ttk.Notebook(self.frm_params_body)
         notebook.pack(fill="x", expand=True, padx=4, pady=3)
 
         cols_per_row = 2
@@ -353,31 +398,63 @@ class FishingApp:
             for i, (label, attr, vtype, tip) in enumerate(items):
                 row = i // cols_per_row
                 col_base = (i % cols_per_row) * 2
+                self._create_param_entry(
+                    grid, row, col_base, label, attr, vtype, tip,
+                    label_width=12, entry_width=8, gpad=gpad
+                )
 
-                display_val = self._config_to_display(attr, vtype)
-                var = tk.StringVar(value=display_val)
-                self._param_vars[attr] = (var, vtype)
+    def _render_legacy_params_panel(self):
+        grid = ttk.Frame(self.frm_params_body)
+        grid.pack(fill="x", padx=6, pady=4)
 
-                lbl = ttk.Label(grid, text=label, width=12, anchor="e")
-                lbl.grid(row=row, column=col_base, sticky="e", **gpad)
+        cols_per_row = 3
+        gpad = {"padx": 3, "pady": 1}
 
-                entry = ttk.Entry(grid, textvariable=var, width=8,
-                                  justify="center")
-                entry.grid(row=row, column=col_base + 1, sticky="w", **gpad)
+        for i, (label, attr, vtype, tip) in enumerate(TUNABLE_PARAMS):
+            row = i // cols_per_row
+            col_base = (i % cols_per_row) * 2
+            self._create_param_entry(
+                grid, row, col_base, label, attr, vtype, tip,
+                label_width=10, entry_width=6, gpad=gpad
+            )
 
-                entry.bind("<Return>", lambda e: self._apply_params())
-                entry.bind("<FocusOut>", lambda e: self._apply_params())
+    def _create_param_entry(self, parent, row, col_base, label, attr, vtype, tip,
+                            label_width, entry_width, gpad):
+        display_val = self._config_to_display(attr, vtype)
+        var = tk.StringVar(value=display_val)
+        self._param_vars[attr] = (var, vtype)
 
-                if tip:
-                    self._create_tooltip(entry, tip)
+        lbl = ttk.Label(parent, text=label, width=label_width, anchor="e")
+        lbl.grid(row=row, column=col_base, sticky="e", **gpad)
 
-        btn_frame = ttk.Frame(frm)
-        btn_frame.pack(fill="x", padx=6, pady=(0, 4))
+        entry = ttk.Entry(parent, textvariable=var, width=entry_width,
+                          justify="center")
+        entry.grid(row=row, column=col_base + 1, sticky="w", **gpad)
+        self._param_entries[attr] = entry
 
-        ttk.Button(btn_frame, text="应用参数",
-                   command=self._apply_params, width=10).pack(side="right", padx=2)
-        ttk.Button(btn_frame, text="恢复默认",
-                   command=self._reset_params, width=10).pack(side="right", padx=2)
+        entry.bind("<Return>", lambda e: self._apply_params())
+        entry.bind("<FocusOut>", lambda e: self._apply_params())
+
+        if tip:
+            self._create_tooltip(entry, tip)
+
+    def _on_params_layout_toggle(self):
+        """切换新版分类/旧版平铺参数界面"""
+        self._render_params_panel()
+        self._save_settings()
+        self._auto_resize()
+        mode = "新版分类界面" if self.var_grouped_params.get() else "旧版平铺界面"
+        self._log_msg(f"[界面] 参数面板已切换为: {mode}")
+
+    def _update_success_threshold_state(self):
+        """根据跳过成功检查开关，禁用/启用成功阈值输入框"""
+        entry = self._param_entries.get("SUCCESS_PROGRESS")
+        if entry is None:
+            return
+        if getattr(config, "SKIP_SUCCESS_CHECK", False):
+            entry.state(["disabled"])
+        else:
+            entry.state(["!disabled"])
 
     def _config_to_display(self, attr: str, vtype: str) -> str:
         """将 config 值转换为 GUI 显示值"""
@@ -477,6 +554,7 @@ class FishingApp:
         config.SKIP_SUCCESS_CHECK = False
         if hasattr(self, 'var_skip_success'):
             self.var_skip_success.set(False)
+        self._update_success_threshold_state()
         config.ANTI_STUCK_MODE = "shake"
         if hasattr(self, 'var_anti_mode'):
             self.var_anti_mode.set("shake")
@@ -510,6 +588,7 @@ class FishingApp:
         data["SKIP_SUCCESS_CHECK"] = config.SKIP_SUCCESS_CHECK
         data["ANTI_STUCK_MODE"] = config.ANTI_STUCK_MODE
         data["SHAKE_HEAD_TIME"] = config.SHAKE_HEAD_TIME
+        data["GROUPED_PARAMS_UI"] = self.var_grouped_params.get()
         try:
             with open(config.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -569,6 +648,7 @@ class FishingApp:
                     config.SKIP_SUCCESS_CHECK = bool(val)
                     if hasattr(self, 'var_skip_success'):
                         self.var_skip_success.set(config.SKIP_SUCCESS_CHECK)
+                    self._update_success_threshold_state()
                     loaded.append(attr)
                 elif attr == "ANTI_STUCK_MODE":
                     if val == "crouch":
@@ -582,6 +662,11 @@ class FishingApp:
                     config.SHAKE_HEAD_TIME = float(val)
                     if hasattr(self, 'var_shake_time'):
                         self.var_shake_time.set(f"{config.SHAKE_HEAD_TIME:.3f}")
+                    loaded.append(attr)
+                elif attr == "GROUPED_PARAMS_UI":
+                    if hasattr(self, 'var_grouped_params'):
+                        self.var_grouped_params.set(bool(val))
+                        self._render_params_panel()
                     loaded.append(attr)
                 elif attr in self._param_vars:
                     setattr(config, attr, val)
@@ -786,8 +871,9 @@ class FishingApp:
     def _on_skip_success_toggle(self):
         """切换 跳过成功检查"""
         config.SKIP_SUCCESS_CHECK = self.var_skip_success.get()
+        self._update_success_threshold_state()
         self._save_settings()
-        state = "开启 (总是点击两次)" if config.SKIP_SUCCESS_CHECK else "关闭"
+        state = "开启 (跳过最终进度判定)" if config.SKIP_SUCCESS_CHECK else "关闭"
         self._log_msg(f"[设置] 跳过成功检查: {state}")
 
     def _on_anti_mode_change(self):
