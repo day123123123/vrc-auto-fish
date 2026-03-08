@@ -88,6 +88,7 @@ class FishingBot:
         self._debug_frame = None         # 最新待显示的帧
         self._debug_lock = threading.Lock()
         self._debug_thread = None
+        self._debug_close_requested = False
 
         # ── 旋转补偿状态 ──
         self._track_angle   = 0.0        # 轨道偏转角度 (度)
@@ -1282,6 +1283,7 @@ class FishingBot:
         """
         if not config.SHOW_DEBUG:
             return
+        self._debug_close_requested = False
         now = time.time()
         if now - self._last_overlay_time < config.DEBUG_OVERLAY_INTERVAL:
             return
@@ -1439,12 +1441,17 @@ class FishingBot:
 
     def _debug_display_loop(self):
         """独立线程: 循环显示 debug 帧, cv2.waitKey 阻塞不影响钓鱼线程"""
-        while self.running or self._debug_frame is not None:
+        while True:
             frame = None
             with self._debug_lock:
                 if self._debug_frame is not None:
                     frame = self._debug_frame
                     self._debug_frame = None
+                close_requested = self._debug_close_requested
+            if close_requested and frame is None:
+                break
+            if not self.running and frame is None:
+                break
             if frame is not None:
                 try:
                     cv2.imshow("Debug Overlay", frame)
@@ -1459,13 +1466,10 @@ class FishingBot:
             pass
 
     def shutdown_debug_overlay(self):
-        """停止时尽快清空并关闭 debug 窗口，避免残留黑屏。"""
+        """请求 debug 线程自行关闭窗口，避免阻塞 GUI 主线程。"""
         with self._debug_lock:
             self._debug_frame = None
-        try:
-            cv2.destroyWindow("Debug Overlay")
-        except Exception:
-            pass
+        self._debug_close_requested = True
 
     # ══════════════════════════════════════════════════════
     #  小游戏辅助
@@ -2008,7 +2012,4 @@ class FishingBot:
             self.input.safe_release()
         self.state = "已停止"
         log.info("钓鱼线程已停止")
-        try:
-            cv2.destroyWindow("Debug Overlay")
-        except Exception:
-            pass
+        self.shutdown_debug_overlay()

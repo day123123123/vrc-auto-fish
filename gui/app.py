@@ -864,11 +864,7 @@ class FishingApp:
         state = "开启" if config.SHOW_DEBUG else "关闭 (提升性能)"
         self._log_msg(f"[Debug] 调试窗口: {state}")
         if not config.SHOW_DEBUG:
-            try:
-                import cv2
-                cv2.destroyWindow("Debug Overlay")
-            except Exception:
-                pass
+            self.bot.shutdown_debug_overlay()
 
     def _on_skip_success_toggle(self):
         """切换 跳过成功检查"""
