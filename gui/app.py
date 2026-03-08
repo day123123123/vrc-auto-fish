@@ -754,13 +754,15 @@ class FishingApp:
     def _on_stop(self):
         """停止钓鱼"""
         self.bot.running = False
+        self.bot._force_minigame = False
         self.bot.input.safe_release()
+        self.bot.shutdown_debug_overlay()
         self.btn_start.config(state="normal")
         self.btn_stop.config(state="disabled")
         self.btn_roi.config(state="normal")
         self.btn_clear_roi.config(state="normal")
         self._log_msg("[系统] ■ 已停止")
-        self._save_log()
+        self._save_log_async()
 
     def _on_toggle_debug(self):
         """切换调试模式"""
@@ -1091,7 +1093,9 @@ class FishingApp:
     def _on_close(self):
         """窗口关闭处理"""
         self.bot.running = False
+        self.bot._force_minigame = False
         self.bot.input.safe_release()
+        self.bot.shutdown_debug_overlay()
         self._save_settings()
         self._save_log()
         self.root.destroy()
@@ -1102,3 +1106,16 @@ class FishingApp:
         path = os.path.join(config.DEBUG_DIR, "last_run.log")
         log.save(path)
         self._log_msg(f"[系统] 日志已保存 → {path}")
+
+    def _save_log_async(self):
+        """后台保存日志，避免停止按钮阻塞 GUI"""
+        path = os.path.join(config.DEBUG_DIR, "last_run.log")
+
+        def _worker():
+            log.save(path)
+            try:
+                self.root.after(0, lambda: self._log_msg(f"[系统] 日志已保存 → {path}"))
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()

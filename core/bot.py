@@ -1458,6 +1458,15 @@ class FishingBot:
         except Exception:
             pass
 
+    def shutdown_debug_overlay(self):
+        """停止时尽快清空并关闭 debug 窗口，避免残留黑屏。"""
+        with self._debug_lock:
+            self._debug_frame = None
+        try:
+            cv2.destroyWindow("Debug Overlay")
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════
     #  小游戏辅助
     # ══════════════════════════════════════════════════════
