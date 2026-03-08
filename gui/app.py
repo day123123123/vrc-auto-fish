@@ -609,7 +609,8 @@ class FishingApp:
                 data["SPEED_DAMPING"] = 0.00025
             if data.get("HOLD_MAX_S", 1) < 0.08:
                 data["HOLD_MAX_S"] = 0.100
-            if data.get("HOLD_MIN_S", 1) < 0.02:
+            # 允许用户保存更小的抗重力基准，只拦截非正数这类明显异常值。
+            if data.get("HOLD_MIN_S", 1) <= 0:
                 data["HOLD_MIN_S"] = 0.025
 
             loaded = []
@@ -824,7 +825,6 @@ class FishingApp:
         ]
         win = tk.Toplevel(self.root)
         win.title("钓鱼白名单")
-        win.geometry("200x320")
         win.resizable(False, False)
         win.transient(self.root)
         win.grab_set()
@@ -833,11 +833,18 @@ class FishingApp:
 
         wl = config.FISH_WHITELIST
         chk_vars = {}
-        for key, name in FISH_NAMES:
+        body = ttk.Frame(win)
+        body.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+        for col in range(2):
+            body.columnconfigure(col, weight=1)
+
+        for i, (key, name) in enumerate(FISH_NAMES):
             var = tk.BooleanVar(value=wl.get(key, True))
             chk_vars[key] = var
-            ttk.Checkbutton(win, text=name, variable=var).pack(
-                anchor="w", padx=30)
+            row = i // 2
+            col = i % 2
+            ttk.Checkbutton(body, text=name, variable=var).grid(
+                row=row, column=col, sticky="w", padx=12, pady=4)
 
         def _apply():
             for key, var in chk_vars.items():
@@ -848,6 +855,16 @@ class FishingApp:
             win.destroy()
 
         ttk.Button(win, text="确定", command=_apply).pack(pady=10)
+        win.update_idletasks()
+        req_w = max(win.winfo_reqwidth() + 20, 260)
+        req_h = max(win.winfo_reqheight() + 10, 240)
+        screen_w = win.winfo_screenwidth()
+        screen_h = win.winfo_screenheight()
+        final_w = min(req_w, screen_w - 80)
+        final_h = min(req_h, screen_h - 80)
+        x = max((screen_w - final_w) // 2, 0)
+        y = max((screen_h - final_h) // 2, 0)
+        win.geometry(f"{final_w}x{final_h}+{x}+{y}")
 
     def _on_topmost(self):
         """切换窗口置顶 (用 int 0/1 确保兼容性)"""
