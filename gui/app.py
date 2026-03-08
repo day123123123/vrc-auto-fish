@@ -973,28 +973,37 @@ class FishingApp:
             "按回车确认, 按ESC取消"
         )
 
-        win_name = "Select Fishing ROI - Enter=OK / Esc=Cancel"
-        cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
-        h, w = img.shape[:2]
-        dw = min(w, 1280)
-        dh = int(h * dw / w)
-        cv2.resizeWindow(win_name, dw, dh)
+        # ★ 在独立线程中运行 cv2.selectROI，避免与 keyboard 库的
+        #   Win32 Hook 线程争抢 GIL 导致 Fatal Python error。
+        def _select_worker(snap):
+            win_name = "Select Fishing ROI - Enter=OK / Esc=Cancel"
+            cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+            h, w = snap.shape[:2]
+            dw = min(w, 1280)
+            dh = int(h * dw / w)
+            cv2.resizeWindow(win_name, dw, dh)
 
-        roi = cv2.selectROI(win_name, img,
-                            fromCenter=False, showCrosshair=True)
-        cv2.destroyAllWindows()
+            roi = cv2.selectROI(win_name, snap,
+                                fromCenter=False, showCrosshair=True)
+            cv2.destroyAllWindows()
 
-        x, y, w_r, h_r = [int(v) for v in roi]
-        if w_r > 10 and h_r > 10:
-            config.DETECT_ROI = [x, y, w_r, h_r]
-            self._save_settings()
-            self.var_roi.set(f"X={x} Y={y} {w_r}x{h_r}")
-            self.lbl_roi.config(foreground="green")
-            self._log_msg(
-                f"[框选] ✓ 检测区域已设置: X={x} Y={y} {w_r}x{h_r}"
-            )
-        else:
-            self._log_msg("[框选] 已取消 (区域太小或按了ESC)")
+            x, y, w_r, h_r = [int(v) for v in roi]
+            if w_r > 10 and h_r > 10:
+                config.DETECT_ROI = [x, y, w_r, h_r]
+                self._save_settings()
+                # tkinter 不是线程安全的，用 after() 回到主线程更新
+                self.master.after(0, lambda: self.var_roi.set(
+                    f"X={x} Y={y} {w_r}x{h_r}"))
+                self.master.after(0, lambda: self.lbl_roi.config(
+                    foreground="green"))
+                self._log_msg(
+                    f"[框选] ✓ 检测区域已设置: X={x} Y={y} {w_r}x{h_r}"
+                )
+            else:
+                self._log_msg("[框选] 已取消 (区域太小或按了ESC)")
+
+        threading.Thread(target=_select_worker, args=(img,),
+                         daemon=True, name="ROISelect").start()
 
     def _on_clear_roi(self):
         """清除框选区域"""
