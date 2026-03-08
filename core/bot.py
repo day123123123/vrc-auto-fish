@@ -9,6 +9,7 @@
 import time
 import cv2
 import os
+import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -426,6 +427,172 @@ class FishingBot:
         return False
 
     # ══════════════════════════════════════════════════════
+    #  双缓冲流水线：截图线程 & 检测线程
+    # ══════════════════════════════════════════════════════
+
+    def _capture_worker_fn(self, frame_q: queue.Queue,
+                           stop_evt: threading.Event):
+        """截图线程：持续截取屏幕并放入帧缓冲区（maxsize=2，满时丢弃旧帧）。"""
+        _fps_limit = getattr(config, 'CAPTURE_FPS_LIMIT', 60)
+        _min_interval = (1.0 / _fps_limit) if _fps_limit > 0 else 0.0
+        _last_cap = 0.0
+        while not stop_evt.is_set():
+            if _min_interval > 0:
+                _now = time.monotonic()
+                _elapsed = _now - _last_cap
+                if _elapsed < _min_interval:
+                    time.sleep(_min_interval - _elapsed)
+                _last_cap = time.monotonic()
+            try:
+                raw = self._grab()
+                scr = (self._rotate_for_detection(raw)
+                       if self._need_rotation else raw)
+                try:
+                    frame_q.put_nowait((raw, scr))
+                except queue.Full:
+                    try:
+                        frame_q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        frame_q.put_nowait((raw, scr))
+                    except queue.Full:
+                        pass
+            except Exception:
+                pass
+
+    def _detect_worker_fn(self, frame_q: queue.Queue,
+                          result_q: queue.Queue,
+                          stop_evt: threading.Event,
+                          shared_params: dict,
+                          params_lock: threading.Lock,
+                          use_yolo: bool):
+        """检测线程：从帧缓冲区取帧，运行 YOLO/模板检测，结果放入接收缓冲区。
+        结果格式: (raw, scr, fish, bar, progress, matched_key, bar_scale, track_det)
+        """
+        _local_track = None   # 模板模式: 缓存最近一次轨道检测结果
+        _local_frame = 0
+
+        while not stop_evt.is_set():
+            try:
+                raw, scr = frame_q.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            _local_frame += 1
+            try:
+                with params_lock:
+                    sr     = shared_params['search_region']
+                    bsr    = shared_params['bar_search_region']
+                    lfk    = shared_params['locked_fish_key']
+                    lfs    = shared_params['locked_fish_scales']
+                    lbs    = shared_params['locked_bar_scales']
+                    fno    = shared_params['frame']
+                    yroi   = shared_params['yolo_roi']
+                    skip_s = shared_params['skip_success']
+
+                fish = bar = progress = None
+                matched_key = None
+                bar_scale   = 1.0
+                track_det   = None
+
+                if use_yolo:
+                    _det      = self.yolo.detect(scr, roi=yroi)
+                    fish      = _det.get("fish")
+                    bar       = _det.get("bar")
+                    track_det = _det.get("track")
+                    if not skip_s:
+                        progress = _det.get("progress")
+                else:
+                    # ── 模板匹配 ──
+                    _FISH_X_HALF = max(config.REGION_X * 2, 80)
+                    _fish_sr = sr
+                    if sr and self._bar_locked_cx is not None:
+                        _sr_x, _sr_y, _sr_w, _sr_h = sr
+                        _nx  = max(_sr_x,
+                                   self._bar_locked_cx - _FISH_X_HALF)
+                        _nx2 = min(_sr_x + _sr_w,
+                                   self._bar_locked_cx + _FISH_X_HALF)
+                        if _nx2 - _nx > 10:
+                            _fish_sr = (_nx, _sr_y, _nx2 - _nx, _sr_h)
+                    if self._fish_smooth_cy is not None and _fish_sr:
+                        _sx, _sy, _sw, _sh = _fish_sr
+                        _ny  = max(_sy, int(self._fish_smooth_cy) - 150)
+                        _ny2 = min(_sy + _sh,
+                                   int(self._fish_smooth_cy) + 150)
+                        if _ny2 - _ny > 30:
+                            _fish_sr = (_sx, _ny, _sw, _ny2 - _ny)
+
+                    _fg, _fox, _foy = self.detector.prepare_gray(
+                        scr, _fish_sr, upload_gpu=True)
+                    _bg, _box, _boy = self.detector.prepare_gray(
+                        scr, bsr, upload_gpu=True)
+                    _has_cuda = self.detector._use_cuda
+
+                    # 鱼检测
+                    if lfk:
+                        _fr = self.detector.find_multiscale(
+                            scr, lfk, config.THRESH_FISH, _fish_sr,
+                            scales=lfs,
+                            pre_gray=_fg, pre_offset=(_fox, _foy))
+                        if _fr is None and _fish_sr is not sr:
+                            _fr = self.detector.find_multiscale(
+                                scr, lfk, config.THRESH_FISH, sr,
+                                scales=lfs)
+                        fish = _fr
+                        matched_key = lfk if _fr else None
+                    else:
+                        if _has_cuda:
+                            fish = self.detector.find_fish(
+                                scr, config.THRESH_FISH, _fish_sr,
+                                pre_gray=_fg, pre_offset=(_fox, _foy))
+                        else:
+                            _n = len(config.FISH_KEYS)
+                            _grp_size  = 2
+                            _grp_count = (_n + _grp_size - 1) // _grp_size
+                            _grp_idx   = fno % _grp_count
+                            _start     = _grp_idx * _grp_size
+                            _keys = config.FISH_KEYS[
+                                _start:_start + _grp_size]
+                            fish = self.detector.find_fish(
+                                scr, config.THRESH_FISH, _fish_sr,
+                                pre_gray=_fg, pre_offset=(_fox, _foy),
+                                keys=_keys)
+                        matched_key = (self.detector._last_best_key
+                                       if fish else None)
+
+                    # 白条检测
+                    _bar_scales = lbs or config.BAR_SCALES
+                    bar = self.detector.find_multiscale(
+                        scr, "bar", config.THRESH_BAR, bsr,
+                        scales=_bar_scales,
+                        pre_gray=_bg, pre_offset=(_box, _boy))
+                    bar_scale = self.detector._last_scale
+
+                    # 定期检测轨道供主循环 UI_CHECK 使用
+                    _track_interval = max(config.UI_CHECK_FRAMES // 2, 5)
+                    if _local_frame % _track_interval == 0:
+                        _local_track = self.detector.find_multiscale(
+                            scr, "track", 0.50)
+                    track_det = _local_track
+
+                det = (raw, scr, fish, bar, progress,
+                       matched_key, bar_scale, track_det)
+                try:
+                    result_q.put_nowait(det)
+                except queue.Full:
+                    try:
+                        result_q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        result_q.put_nowait(det)
+                    except queue.Full:
+                        pass
+            except Exception:
+                pass
+
+    # ══════════════════════════════════════════════════════
     #  第4步: 钓鱼小游戏
     # ══════════════════════════════════════════════════════
 
@@ -643,14 +810,48 @@ class FishingBot:
         _last_green = 0.0
         _PROGRESS_SKIP_FRAMES = 20
         _prev_green = 0.0
+
+        # ── 双缓冲流水线：启动截图线程与检测线程 ──
+        _frame_q   = queue.Queue(maxsize=2)   # 帧缓冲区 (截图→检测)
+        _result_q  = queue.Queue(maxsize=2)   # 结果缓冲区 (检测→主循环)
+        _stop_pipe = threading.Event()
+        _shared_params = {
+            'search_region':     search_region,
+            'bar_search_region': bar_search_region,
+            'locked_fish_key':   locked_fish_key,
+            'locked_fish_scales': locked_fish_scales,
+            'locked_bar_scales': locked_bar_scales,
+            'frame':             0,
+            'yolo_roi':          config.DETECT_ROI or self._auto_roi,
+            'skip_success':      _skip_success_check,
+        }
+        _params_lock = threading.Lock()
+        _cap_t = threading.Thread(
+            target=self._capture_worker_fn,
+            args=(_frame_q, _stop_pipe),
+            daemon=True, name="FishCapture")
+        _det_t = threading.Thread(
+            target=self._detect_worker_fn,
+            args=(_frame_q, _result_q, _stop_pipe,
+                  _shared_params, _params_lock, _use_yolo),
+            daemon=True, name="FishDetect")
+        _cap_t.start()
+        _det_t.start()
+        log.info("[流水线] 截图线程 & 检测线程已启动")
+
         try:
             while self.running:
+                # ── 从接收缓冲区取最新检测结果（最多等待 0.5s）──
+                try:
+                    _pipe = _result_q.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+                (screen_raw, screen,
+                 _pipe_fish, _pipe_bar, _pipe_progress,
+                 _pipe_mk, _pipe_bs, _pipe_track) = _pipe
+
                 frame += 1
                 self._tick_fps()
-
-                screen_raw = self._grab()
-                screen = self._rotate_for_detection(screen_raw) \
-                    if self._need_rotation else screen_raw
 
                 # ════════════ 超时检测 ════════════
                 elapsed = time.time() - minigame_start
@@ -661,15 +862,9 @@ class FishingBot:
                     )
                     break
 
-                # ════════════ 定期检查 UI 是否还存在 ════════════
+                # ════════════ 定期检查 UI 是否还存在（使用流水线 track 结果）════════════
                 if frame % config.UI_CHECK_FRAMES == 0 and frame > 10:
-                    if _use_yolo:
-                        _tc = self.yolo.detect(screen, config.DETECT_ROI or self._auto_roi)
-                        track_check = _tc["track"]
-                    else:
-                        track_check = self.detector.find_multiscale(
-                            screen, "track", 0.50
-                        )
+                    track_check = _pipe_track   # 由检测线程提供
                     if track_check is None:
                         ui_gone_count += 1
                         track_alive = False
@@ -688,15 +883,9 @@ class FishingBot:
                 if frame % 60 == 0:
                     self.input.ensure_cursor_in_game()
 
-                # ════════════ ★ 连续丢失时跳过昂贵的全量搜索 ════════════
+                # ════════════ ★ 连续丢失时跳过控制（检测已由后台线程完成）════════════
                 if no_detect > 3 and not _use_yolo:
-                    bar_quick = self.detector.find_multiscale(
-                        screen, "bar", config.THRESH_BAR,
-                        bar_search_region,
-                        scales=locked_bar_scales or config.BAR_SCALES,
-                    )
-                    if bar_quick is not None:
-                        # UI可能恢复了, 重置计数让下一帧做完整检测
+                    if _pipe_bar is not None:
                         log.info(f"[✓ 恢复] 丢失{no_detect}帧后重新检测到白条")
                         no_detect = 0
                     else:
@@ -708,30 +897,21 @@ class FishingBot:
                                 f"[📋 结束] 连续{no_detect}帧未检测到有效UI，"
                                 f"达到结束帧数 {config.VERIFY_FRAMES}")
                             break
-                        # ★ debug 窗口仍然刷新
                         self._show_debug_overlay(
                             screen_raw,
                             status_text=f"⚠ 丢失中 {no_detect}/{config.VERIFY_FRAMES}"
                         )
-                        time.sleep(config.GAME_LOOP_INTERVAL)
                         continue
 
-                # ════════════ 检测鱼 + 白条 ════════════
-                fish = None
-                bar = None
+                # ════════════ 检测鱼 + 白条（结果来自检测线程）════════════
+                fish           = _pipe_fish
+                bar            = _pipe_bar
+                _matched_key   = _pipe_mk
+                _bar_scale     = _pipe_bs
+                _yolo_progress = _pipe_progress
                 fish_detect_name = ""
-                _matched_key = None
-                _bar_scale = 1.0
 
-                _yolo_progress = None
                 if _use_yolo:
-                    # ──── YOLO: 一次推理检测全部 ────
-                    _yolo_roi = config.DETECT_ROI or self._auto_roi
-                    _ydet = self.yolo.detect(screen, roi=_yolo_roi)
-                    fish = _ydet["fish"]
-                    bar = _ydet["bar"]
-                    if not _skip_success_check:
-                        _yolo_progress = _ydet.get("progress")
                     if fish is not None:
                         _save = not _fish_id_saved
                         _color_key = self.detector.identify_fish_type(
@@ -740,9 +920,6 @@ class FishingBot:
                             _fish_id_saved = True
                         _matched_key = _color_key
                         fish_detect_name = _color_key
-                    else:
-                        _matched_key = None
-                        fish_detect_name = ""
 
                     # YOLO 数据采集: 保存完整窗口画面（不裁剪ROI）
                     if config.YOLO_COLLECT and frame % 10 == 0:
@@ -755,92 +932,6 @@ class FishingBot:
                         cv2.imwrite(
                             os.path.join(_cdir, f"{_ts}_{_ms:03d}.png"),
                             screen)
-
-                else:
-                    # ──── 模板匹配: 原有逻辑 ────
-                    _fish_sr = search_region
-                    if search_region:
-                        _sr_x, _sr_y, _sr_w, _sr_h = search_region
-                        _new_x, _new_w = _sr_x, _sr_w
-                        _new_y, _new_h = _sr_y, _sr_h
-                        if self._bar_locked_cx is not None:
-                            _nx = max(_sr_x,
-                                      self._bar_locked_cx - _FISH_X_HALF)
-                            _nx2 = min(_sr_x + _sr_w,
-                                       self._bar_locked_cx + _FISH_X_HALF)
-                            if _nx2 - _nx > 10:
-                                _new_x, _new_w = _nx, _nx2 - _nx
-                        if self._fish_smooth_cy is not None:
-                            _ny = max(_sr_y,
-                                      int(self._fish_smooth_cy) - 150)
-                            _ny2 = min(_sr_y + _sr_h,
-                                       int(self._fish_smooth_cy) + 150)
-                            if _ny2 - _ny > 30:
-                                _new_y, _new_h = _ny, _ny2 - _ny
-                        _fish_sr = (_new_x, _new_y, _new_w, _new_h)
-
-                    _fg, _fox, _foy = self.detector.prepare_gray(
-                        screen, _fish_sr, upload_gpu=True
-                    )
-                    _bg, _box, _boy = self.detector.prepare_gray(
-                        screen, bar_search_region, upload_gpu=True
-                    )
-
-                    _has_cuda = self.detector._use_cuda
-
-                    def _detect_fish():
-                        if locked_fish_key:
-                            r = self.detector.find_multiscale(
-                                screen, locked_fish_key, config.THRESH_FISH,
-                                _fish_sr, scales=locked_fish_scales,
-                                pre_gray=_fg, pre_offset=(_fox, _foy),
-                            )
-                            if r is None and _fish_sr is not search_region:
-                                r = self.detector.find_multiscale(
-                                    screen, locked_fish_key,
-                                    config.THRESH_FISH,
-                                    search_region, scales=locked_fish_scales
-                                )
-                            return r, locked_fish_key if r else None
-                        else:
-                            if _has_cuda:
-                                r = self.detector.find_fish(
-                                    screen, config.THRESH_FISH, _fish_sr,
-                                    pre_gray=_fg, pre_offset=(_fox, _foy),
-                                )
-                            else:
-                                _n = len(config.FISH_KEYS)
-                                _grp_size = 2
-                                _grp_count = ((_n + _grp_size - 1)
-                                              // _grp_size)
-                                _grp_idx = frame % _grp_count
-                                _start = _grp_idx * _grp_size
-                                _keys = config.FISH_KEYS[
-                                    _start:_start + _grp_size]
-                                r = self.detector.find_fish(
-                                    screen, config.THRESH_FISH, _fish_sr,
-                                    pre_gray=_fg, pre_offset=(_fox, _foy),
-                                    keys=_keys,
-                                )
-                            return (r, self.detector._last_best_key
-                                    if r else None)
-
-                    def _detect_bar():
-                        _scales = locked_bar_scales or config.BAR_SCALES
-                        r = self.detector.find_multiscale(
-                            screen, "bar", config.THRESH_BAR,
-                            bar_search_region, scales=_scales,
-                            pre_gray=_bg, pre_offset=(_box, _boy),
-                        )
-                        return r, self.detector._last_scale
-
-                    fut_fish = self._pool.submit(_detect_fish)
-                    fut_bar = self._pool.submit(_detect_bar)
-                    fish_result = fut_fish.result()
-                    bar_result = fut_bar.result()
-
-                    fish, _matched_key = fish_result
-                    bar, _bar_scale = bar_result
                 if not _use_yolo:
                     fish_detect_name = ""
                     if locked_fish_key:
@@ -1203,9 +1294,23 @@ class FishingBot:
                             f"按住:{hold_count} | 进度:{green:.0%}"
                         )
 
+                # —— 同步检测参数供检测线程下帧使用 ——
+                with _params_lock:
+                    _shared_params['search_region']      = search_region
+                    _shared_params['bar_search_region']  = bar_search_region
+                    _shared_params['locked_fish_key']    = locked_fish_key
+                    _shared_params['locked_fish_scales'] = locked_fish_scales
+                    _shared_params['locked_bar_scales']  = locked_bar_scales
+                    _shared_params['frame']              = frame
+
                 time.sleep(config.GAME_LOOP_INTERVAL)
 
         finally:
+            # —— 停止流水线线程 ——
+            _stop_pipe.set()
+            _cap_t.join(timeout=1.0)
+            _det_t.join(timeout=1.0)
+            log.info("[流水线] 截图线程 & 检测线程已停止")
             if _hook_timeout_retry:
                 self.input.safe_release()
                 if self._wait_with_minigame_preempt(0.3, "⏳ 收杆前等待"):
