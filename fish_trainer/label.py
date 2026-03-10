@@ -20,6 +20,7 @@ from fish_trainer.classes import (
     CLASS_SHORTCUTS,
     DISPLAY_NAMES,
     KEY_TO_CLASS,
+    OVERLAY_NAMES,
 )
 from fish_trainer.paths import TRAIN_IMG, TRAIN_LBL, UNLABELED, VAL_IMG, VAL_LBL, ensure_dataset_dirs
 
@@ -33,8 +34,8 @@ img_orig = None
 
 def short_help():
     return (
-        "[F]=通用鱼 [1-9]=具体颜色 [B]=bar [T]=track [P]=progress "
-        "[N/M]=切类 [Z]=撤销 [X]=清空 [H]=帮助 [S/Enter]=保存 [D]=跳过 [Q/Esc]=退出"
+        "[F]=generic [1-9]=fish colors [B]=bar [T]=track [P]=progress "
+        "[N/M]=prev/next [Z]=undo [X]=clear [H]=help [S]=save [D]=skip [Q]=quit"
     )
 
 
@@ -61,7 +62,7 @@ def draw_overlay():
 
     for cls, x1, y1, x2, y2 in boxes:
         color = CLASS_COLORS.get(cls, (128, 128, 128))
-        label = DISPLAY_NAMES.get(cls, CLASS_NAMES.get(cls, "?"))
+        label = OVERLAY_NAMES.get(cls, CLASS_NAMES.get(cls, "?"))
         cv2.rectangle(img_display, (x1, y1), (x2, y2), color, 2)
         cv2.putText(
             img_display,
@@ -76,7 +77,7 @@ def draw_overlay():
     for cls_id in sorted(CLASS_NAMES):
         color = CLASS_COLORS.get(cls_id, (128, 128, 128))
         marker = ">" if cls_id == current_class else " "
-        legend = f"{marker}[{CLASS_SHORTCUTS.get(cls_id, '?')}] {DISPLAY_NAMES.get(cls_id)}"
+        legend = f"{marker}[{CLASS_SHORTCUTS.get(cls_id, '?')}] {OVERLAY_NAMES.get(cls_id)}"
         cv2.putText(
             img_display,
             legend,
@@ -90,7 +91,7 @@ def draw_overlay():
 
     cv2.putText(
         img_display,
-        f"当前类别: {DISPLAY_NAMES.get(current_class, '?')} | 框数: {len(boxes)} | {short_help()}",
+        f"class: {OVERLAY_NAMES.get(current_class, '?')} | boxes: {len(boxes)} | {short_help()}",
         (5, h - 10),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.42,

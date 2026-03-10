@@ -52,6 +52,22 @@ DISPLAY_NAMES = {
     12: "进度条",
 }
 
+OVERLAY_NAMES = {
+    0: "fish_generic",
+    1: "fish_white",
+    2: "fish_copper",
+    3: "fish_green",
+    4: "fish_blue",
+    5: "fish_purple",
+    6: "fish_golden",
+    7: "fish_red",
+    8: "fish_pink",
+    9: "fish_rainbow",
+    10: "bar",
+    11: "track",
+    12: "progress",
+}
+
 KEY_TO_CLASS = {
     ord("f"): 0,
     ord("1"): 1,
