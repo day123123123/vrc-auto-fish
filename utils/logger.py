@@ -5,6 +5,7 @@
 """
 
 import os
+import sys
 import time
 import queue
 
@@ -31,7 +32,14 @@ class Logger:
     def _emit(self, level: str, msg: str):
         ts = time.strftime("%H:%M:%S")
         line = f"[{ts}][{level:>5s}] {msg}"
-        print(line)
+        try:
+            print(line)
+        except UnicodeEncodeError:
+            encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+            safe_line = line.encode(encoding, errors="replace").decode(
+                encoding, errors="replace"
+            )
+            print(safe_line)
         self._lines.append(line)
         try:
             self.log_queue.put_nowait(line)

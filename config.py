@@ -41,7 +41,7 @@ HOOK_POST_DELAY     = 0.4         # 提竿后等待 UI 出现 (★ 0.3→0.4)
 VERIFY_FRAMES       = 5           # 主循环连续丢失达到 N 帧后直接判定结束
 GAME_LOOP_INTERVAL  = 0.005       # 小游戏循环间隔 (60FPS游戏, 尽量快)
 CAPTURE_FPS_LIMIT   = 0           # 截图线程最大帧率上限 (0=不限制, 更接近旧版同步手感)
-SYNC_PD_MODE       = True         # True=旧版模式(使用旧版参数), False=异步流水线模式
+SYNC_PD_MODE       = False        # True=旧版模式(使用旧版参数), False=异步流水线模式
 SHOW_DEBUG             = True     # 是否显示debug窗口 (关闭可提升性能)
 DEBUG_OVERLAY_INTERVAL = 0.033    # debug窗口最小刷新间隔(秒) ~30FPS
 DEBUG_OVERLAY_MAX_W    = 1920  # debug窗口最大宽度(像素)
@@ -88,7 +88,7 @@ FISH_GAME_SIZE = 30
 DEAD_ZONE       = 15              # 固定死区(px), 备用 (动态死区优先)
 DEAD_ZONE_RATIO = 0.35            # 动态死区: 白条高度 × 此比例 (鱼在白条中心此范围内=居中)
 MAINTAIN_TAP_S  = 0.010           # 死区内维持性短按时长(秒), 抵消重力防坠底
-HOLD_MIN_S      = 0.025           # 抗重力基准 (秒) — 越小下降越快
+HOLD_MIN_S      = 0.005           # 抗重力基准 (秒) — 越小下降越快
 HOLD_MAX_S      = 0.100           # 单次最长按住 (秒)
 HOLD_GAIN       = 0.040           # 位置增益: 误差×增益=额外按住时长
 VELOCITY_SMOOTH = 0.5             # 速度低通滤波系数 (0~1, 越大越平滑)
