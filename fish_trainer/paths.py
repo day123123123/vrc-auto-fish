@@ -5,18 +5,24 @@
 """
 
 import os
+import sys
 
 import config
 
 
-BASE = os.path.join(config.BASE_DIR, "fish_trainer", "dataset")
+APP_ROOT = (
+    os.path.dirname(sys.executable)
+    if getattr(sys, "frozen", False)
+    else config.BASE_DIR
+)
+BASE = os.path.join(APP_ROOT, "fish_trainer", "dataset")
 UNLABELED = os.path.join(BASE, "images", "unlabeled")
 TRAIN_IMG = os.path.join(BASE, "images", "train")
 TRAIN_LBL = os.path.join(BASE, "labels", "train")
 VAL_IMG = os.path.join(BASE, "images", "val")
 VAL_LBL = os.path.join(BASE, "labels", "val")
 DATA_YAML = os.path.join(BASE, "data_multiclass.yaml")
-RUNS_DIR = os.path.join(config.BASE_DIR, "fish_trainer", "runs")
+RUNS_DIR = os.path.join(APP_ROOT, "fish_trainer", "runs")
 
 
 def ensure_dataset_dirs():
