@@ -5,8 +5,9 @@
 """
 
 import os
-import time
 import queue
+import sys
+import time
 
 
 class Logger:
@@ -31,12 +32,24 @@ class Logger:
     def _emit(self, level: str, msg: str):
         ts = time.strftime("%H:%M:%S")
         line = f"[{ts}][{level:>5s}] {msg}"
-        print(line)
+        self._safe_print(line)
         self._lines.append(line)
         try:
             self.log_queue.put_nowait(line)
         except queue.Full:
             pass
+
+    @staticmethod
+    def _safe_print(text: str):
+        try:
+            print(text)
+        except UnicodeEncodeError:
+            stream = sys.stdout
+            encoding = getattr(stream, "encoding", None) or "utf-8"
+            sanitized = text.encode(encoding, errors="replace").decode(
+                encoding, errors="replace"
+            )
+            print(sanitized)
 
     def save(self, path: str):
         """将当前所有日志覆盖写入文件"""
@@ -46,7 +59,7 @@ class Logger:
                 f.write("\n".join(self._lines))
                 f.write("\n")
         except Exception as e:
-            print(f"[Logger] 保存日志失败: {e}")
+            self._safe_print(f"[Logger] 保存日志失败: {e}")
 
     def clear(self):
         """清空内存中的日志缓存"""

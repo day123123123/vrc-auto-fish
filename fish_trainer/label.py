@@ -22,6 +22,7 @@ from fish_trainer.classes import (
     KEY_TO_CLASS,
     OVERLAY_NAMES,
 )
+from fish_trainer.console import safe_print
 from fish_trainer.paths import TRAIN_IMG, TRAIN_LBL, UNLABELED, VAL_IMG, VAL_LBL, ensure_dataset_dirs
 
 drawing = False
@@ -40,18 +41,18 @@ def short_help():
 
 
 def print_help():
-    print("=" * 72)
-    print("  多颜色鱼标注快捷键")
-    print("=" * 72)
+    safe_print("=" * 72)
+    safe_print("  多颜色鱼标注快捷键")
+    safe_print("=" * 72)
     for cls_id in sorted(CLASS_NAMES):
-        print(
+        safe_print(
             f"  [{CLASS_SHORTCUTS.get(cls_id, '?')}] "
             f"{DISPLAY_NAMES.get(cls_id, CLASS_NAMES[cls_id])} ({CLASS_NAMES[cls_id]})"
         )
-    print("  [N]/[M] 下一个/上一个类别")
-    print("  [Z] 撤销  [X] 清空当前图片标注")
-    print("  [S]/[Enter] 保存  [D] 跳过  [Q]/[Esc] 退出")
-    print("=" * 72)
+    safe_print("  [N]/[M] 下一个/上一个类别")
+    safe_print("  [Z] 撤销  [X] 清空当前图片标注")
+    safe_print("  [S]/[Enter] 保存  [D] 跳过  [Q]/[Esc] 退出")
+    safe_print("=" * 72)
 
 
 def draw_overlay():
@@ -172,57 +173,57 @@ def label_loop(file_pairs, save_func, mode_name):
         draw_overlay()
         cv2.imshow("Fish Trainer Label Tool", img_display)
 
-        print(f"[{idx + 1}/{len(file_pairs)}] {os.path.basename(img_path)} ({w}x{h})")
+        safe_print(f"[{idx + 1}/{len(file_pairs)}] {os.path.basename(img_path)} ({w}x{h})")
         while True:
             key = cv2.waitKey(0) & 0xFF
             lower_key = ord(chr(key).lower()) if key < 256 else key
 
             if lower_key in KEY_TO_CLASS:
                 current_class = KEY_TO_CLASS[lower_key]
-                print(f"    类别 → {DISPLAY_NAMES.get(current_class)} ({CLASS_NAMES.get(current_class)})")
+                safe_print(f"    类别 -> {DISPLAY_NAMES.get(current_class)} ({CLASS_NAMES.get(current_class)})")
                 draw_overlay()
                 cv2.imshow("Fish Trainer Label Tool", img_display)
             elif key in (ord("n"), ord("N")):
                 current_class = (current_class + 1) % len(CLASS_NAMES)
-                print(f"    类别 → {DISPLAY_NAMES.get(current_class)} ({CLASS_NAMES.get(current_class)})")
+                safe_print(f"    类别 -> {DISPLAY_NAMES.get(current_class)} ({CLASS_NAMES.get(current_class)})")
                 draw_overlay()
                 cv2.imshow("Fish Trainer Label Tool", img_display)
             elif key in (ord("m"), ord("M")):
                 current_class = (current_class - 1) % len(CLASS_NAMES)
-                print(f"    类别 → {DISPLAY_NAMES.get(current_class)} ({CLASS_NAMES.get(current_class)})")
+                safe_print(f"    类别 -> {DISPLAY_NAMES.get(current_class)} ({CLASS_NAMES.get(current_class)})")
                 draw_overlay()
                 cv2.imshow("Fish Trainer Label Tool", img_display)
             elif key in (ord("z"), ord("Z")):
                 if boxes:
                     removed = boxes.pop()
-                    print(f"    撤销: {DISPLAY_NAMES.get(removed[0], '?')}")
+                    safe_print(f"    撤销: {DISPLAY_NAMES.get(removed[0], '?')}")
                     draw_overlay()
                     cv2.imshow("Fish Trainer Label Tool", img_display)
             elif key in (ord("x"), ord("X")):
                 boxes.clear()
-                print("    已清空当前图片全部标注")
+                safe_print("    已清空当前图片全部标注")
                 draw_overlay()
                 cv2.imshow("Fish Trainer Label Tool", img_display)
             elif key in (ord("h"), ord("H")):
                 print_help()
             elif key in (ord("s"), ord("S"), 13):
                 if not boxes:
-                    print("    [跳过] 没有标注框")
+                    safe_print("    [跳过] 没有标注框")
                     break
                 save_func(img_path, lbl_path)
                 labeled += 1
-                print(f"    [保存] {len(boxes)} 个框")
+                safe_print(f"    [保存] {len(boxes)} 个框")
                 break
             elif key in (ord("d"), ord("D")):
-                print("    [跳过] 此图不修改")
+                safe_print("    [跳过] 此图不修改")
                 break
             elif key in (ord("q"), ord("Q"), 27):
                 cv2.destroyAllWindows()
-                print(f"\n[退出] 共{mode_name} {labeled} 张")
+                safe_print(f"\n[退出] 共{mode_name} {labeled} 张")
                 return
 
     cv2.destroyAllWindows()
-    print(f"\n[完成] 共{mode_name} {labeled} 张")
+    safe_print(f"\n[完成] 共{mode_name} {labeled} 张")
 
 
 def build_parser():
@@ -249,7 +250,7 @@ def main(argv=None):
                         os.path.join(lbl_dir, os.path.splitext(name)[0] + ".txt"),
                     ))
         if not pairs:
-            print("[提示] train/ val/ 中没有可补标的图片")
+            safe_print("[提示] train/ val/ 中没有可补标的图片")
             return
 
         def save_inplace(_img_path, lbl_path):
@@ -263,7 +264,7 @@ def main(argv=None):
         if f.lower().endswith((".png", ".jpg", ".jpeg", ".bmp"))
     )
     if not files:
-        print(f"[提示] {UNLABELED} 中没有未标注图片")
+        safe_print(f"[提示] {UNLABELED} 中没有未标注图片")
         return
 
     def save_new(img_path, _unused_lbl):
@@ -274,7 +275,7 @@ def main(argv=None):
         lbl_path = os.path.join(dst_lbl_dir, name + ".txt")
         write_yolo_labels(lbl_path)
         shutil.move(img_path, os.path.join(dst_img_dir, os.path.basename(img_path)))
-        print(f"      → {'val' if is_val else 'train'}/")
+        safe_print(f"      -> {'val' if is_val else 'train'}/")
 
     file_pairs = [(os.path.join(UNLABELED, name), None) for name in files]
     label_loop(file_pairs, save_new, mode_name="标注")

@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from core.screen import ScreenCapture
 from core.window import WindowManager
+from fish_trainer.console import safe_print
 from fish_trainer.paths import UNLABELED, ensure_dataset_dirs
 
 
@@ -51,23 +52,23 @@ def main(argv=None):
     window = WindowManager(config.WINDOW_TITLE)
     screen = ScreenCapture()
     if not window.find():
-        print("[错误] 未找到 VRChat 窗口，请确保游戏正在运行")
+        safe_print("[错误] 未找到 VRChat 窗口，请确保游戏正在运行")
         return
 
     roi = load_saved_roi() if args.roi else None
     interval = 1.0 / max(args.fps, 0.1)
     count = 0
 
-    print(f"[✓] 已连接: {window.title} (HWND={window.hwnd})")
-    print(f"[保存] {UNLABELED}")
-    print(f"[设置] 截图间隔: {interval:.2f}s | ROI: {'是' if roi else '否'}")
+    safe_print(f"[OK] 已连接: {window.title} (HWND={window.hwnd})")
+    safe_print(f"[保存] {UNLABELED}")
+    safe_print(f"[设置] 截图间隔: {interval:.2f}s | ROI: {'是' if roi else '否'}")
     if roi:
-        print(f"[ROI] X={roi[0]} Y={roi[1]} {roi[2]}x{roi[3]}")
+        safe_print(f"[ROI] X={roi[0]} Y={roi[1]} {roi[2]}x{roi[3]}")
 
     try:
         while True:
             if not window.is_valid() and not window.find():
-                print("[等待] VRChat 窗口未找到，5 秒后重试...")
+                safe_print("[等待] VRChat 窗口未找到，5 秒后重试...")
                 time.sleep(5)
                 continue
 
@@ -86,14 +87,14 @@ def main(argv=None):
             cv2.imwrite(os.path.join(UNLABELED, name), img)
             count += 1
             h, w = img.shape[:2]
-            print(f"  [{count}] {name} ({w}x{h})", end="\r")
+            safe_print(f"  [{count}] {name} ({w}x{h})", end="\r")
 
             if args.max > 0 and count >= args.max:
-                print(f"\n[完成] 已采集 {count} 张截图")
+                safe_print(f"\n[完成] 已采集 {count} 张截图")
                 break
             time.sleep(interval)
     except KeyboardInterrupt:
-        print(f"\n[停止] 共采集 {count} 张截图 → {UNLABELED}")
+        safe_print(f"\n[停止] 共采集 {count} 张截图 -> {UNLABELED}")
 
 
 if __name__ == "__main__":

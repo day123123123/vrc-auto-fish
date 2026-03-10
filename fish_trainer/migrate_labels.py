@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
+from fish_trainer.console import safe_print
 from fish_trainer.paths import TRAIN_IMG, TRAIN_LBL, UNLABELED, VAL_IMG, VAL_LBL, ensure_dataset_dirs
 
 LEGACY_DATASET = os.path.join(config.BASE_DIR, "yolo", "dataset")
@@ -108,8 +109,8 @@ def main():
 
     source_root = args.source
     ensure_dataset_dirs()
-    print(f"[迁移] 来源: {source_root}")
-    print(f"[迁移] 目标: {os.path.join(config.BASE_DIR, 'fish_trainer', 'dataset')}")
+    safe_print(f"[迁移] 来源: {source_root}")
+    safe_print(f"[迁移] 目标: {os.path.join(config.BASE_DIR, 'fish_trainer', 'dataset')}")
 
     train_stats = copy_tree_split(source_root, "train", overwrite=args.overwrite)
     val_stats = copy_tree_split(source_root, "val", overwrite=args.overwrite)
@@ -118,12 +119,12 @@ def main():
         if args.with_unlabeled else 0
     )
 
-    print("[完成] 迁移结果:")
-    print(f"  train: 图片 {train_stats['images']} 张, 标签 {train_stats['labels']} 个, 跳过 {train_stats['skipped']}")
-    print(f"  val:   图片 {val_stats['images']} 张, 标签 {val_stats['labels']} 个, 跳过 {val_stats['skipped']}")
+    safe_print("[完成] 迁移结果:")
+    safe_print(f"  train: 图片 {train_stats['images']} 张, 标签 {train_stats['labels']} 个, 跳过 {train_stats['skipped']}")
+    safe_print(f"  val:   图片 {val_stats['images']} 张, 标签 {val_stats['labels']} 个, 跳过 {val_stats['skipped']}")
     if args.with_unlabeled:
-        print(f"  unlabeled: 复制 {unlabeled_count} 张")
-    print("  旧类别映射: fish->fish_generic, bar->bar, track->track, progress->progress")
+        safe_print(f"  unlabeled: 复制 {unlabeled_count} 张")
+    safe_print("  旧类别映射: fish->fish_generic, bar->bar, track->track, progress->progress")
 
 
 if __name__ == "__main__":
