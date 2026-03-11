@@ -9,6 +9,7 @@ YOLO 目标检测器
   10 = bar
   11 = track
   12 = progress
+  13 = prog_hook
 """
 
 import os
@@ -140,6 +141,7 @@ class YoloDetector:
             "bar": None,
             "track": None,
             "progress": None,
+            "prog_hook": None,
             "fish_name": "",
             "raw": [],
         }
@@ -179,6 +181,9 @@ class YoloDetector:
             elif class_name == "progress":
                 if detections["progress"] is None or conf > detections["progress"][4]:
                     detections["progress"] = det
+            elif class_name == "prog_hook":
+                if detections["prog_hook"] is None or conf > detections["prog_hook"][4]:
+                    detections["prog_hook"] = det
 
         return detections
 

@@ -4,15 +4,16 @@ val: images/val
 
 names:
   0: fish_generic
-  1: bar
-  2: track
-  3: progress
-  4: fish_white
-  5: fish_copper
-  6: fish_green
-  7: fish_blue
-  8: fish_purple
-  9: fish_golden
-  10: fish_red
-  11: fish_pink
-  12: fish_rainbow
+  1: fish_white
+  2: fish_copper
+  3: fish_green
+  4: fish_blue
+  5: fish_purple
+  6: fish_golden
+  7: fish_red
+  8: fish_pink
+  9: fish_rainbow
+  10: bar
+  11: track
+  12: progress
+  13: prog_hook

@@ -881,3 +881,120 @@ class ImageDetector:
         )
         total = mask.size
         return float(np.count_nonzero(mask)) / total if total > 0 else 0.0
+
+    def detect_progress_hook(self, screen, search_region=None):
+        """检测进度条上的鱼钩位置。"""
+        return self.find_multiscale(
+            screen,
+            "prog_hook",
+            threshold=getattr(config, "THRESH_PROG_HOOK", 0.55),
+            search_region=search_region,
+            scales=getattr(config, "PROG_HOOK_SCALES", None),
+        )
+
+    def _detect_progress_green_box(self, screen, progress_box):
+        """在 progress 框内部提取绿色进度区域。"""
+        px, py, pw, ph = [int(v) for v in progress_box[:4]]
+        if pw <= 0 or ph <= 0:
+            return None
+
+        pad_x = max(1, int(pw * 0.08))
+        pad_y = max(1, int(ph * 0.05))
+        rx = max(0, px + pad_x)
+        ry = max(0, py + pad_y)
+        rw = max(1, min(screen.shape[1] - rx, pw - pad_x * 2))
+        rh = max(1, min(screen.shape[0] - ry, ph - pad_y * 2))
+        if rw <= 0 or rh <= 0:
+            return None
+
+        roi = screen[ry:ry + rh, rx:rx + rw]
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(
+            hsv,
+            np.array([25, 30, 30]),
+            np.array([100, 255, 255])
+        )
+        kernel = np.ones((3, 3), dtype=np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+
+        best = None
+        best_area = 0.0
+        min_area = max(8.0, rw * rh * 0.01)
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < min_area:
+                continue
+            x, y, w, h = cv2.boundingRect(cnt)
+            if h < max(4, rh * 0.10):
+                continue
+            if area > best_area:
+                best_area = area
+                best = (rx + x, ry + y, w, h)
+        return best
+
+    @staticmethod
+    def estimate_progress_ratio_from_hook_box(hook_box, search_region):
+        """根据鱼钩框在搜索区域中的纵向位置估算进度。"""
+        if hook_box is None or search_region is None:
+            return 0.0
+
+        _rx, ry, _rw, rh = [int(v) for v in search_region]
+        if rh <= 0:
+            return 0.0
+
+        hook_cy = int(hook_box[1]) + int(hook_box[3]) // 2
+        ratio = 1.0 - ((hook_cy - ry) / float(rh))
+        return max(0.0, min(1.0, ratio))
+
+    def estimate_progress_by_hook(self, screen, search_region=None):
+        """
+        用鱼钩的纵向位置估算当前进度。
+        返回: (ratio, hook_box)
+        """
+        hook = self.detect_progress_hook(screen, search_region=search_region)
+        if hook is None:
+            return 0.0, None
+        if search_region is None:
+            search_region = (0, 0, screen.shape[1], screen.shape[0])
+        return self.estimate_progress_ratio_from_hook_box(hook, search_region), hook
+
+    def estimate_progress_in_box(self, screen, progress_box):
+        """
+        只在 progress 框内部做局部检测:
+        1. 先用绿色区域定位进度大致高度
+        2. 再在绿色顶部附近做鱼钩模板匹配
+        3. 模板失败时回退到绿色顶部几何估计
+
+        返回: (ratio, hook_box, source)
+        source: "template" | "geometry" | None
+        """
+        px, py, pw, ph = [int(v) for v in progress_box[:4]]
+        if pw <= 0 or ph <= 0:
+            return 0.0, None, None
+
+        green_box = self._detect_progress_green_box(screen, progress_box)
+        if green_box is not None:
+            gx, gy, gw, gh = green_box
+            search_x = max(0, px - max(2, int(pw * 0.05)))
+            search_y = max(py, gy - max(6, int(ph * 0.12)))
+            search_w = min(screen.shape[1] - search_x, pw + max(6, int(pw * 0.10)))
+            search_h = min(screen.shape[0] - search_y, max(12, int(ph * 0.28)))
+            hook_region = (search_x, search_y, search_w, search_h)
+            hook = self.detect_progress_hook(screen, search_region=hook_region)
+            if hook is not None:
+                ratio = self.estimate_progress_ratio_from_hook_box(hook, progress_box)
+                return ratio, hook, "template"
+
+            # 几何回退: 用绿色顶部近似鱼钩位置
+            pseudo_h = max(4, min(8, gh))
+            pseudo_box = (gx, gy, max(gw, 6), pseudo_h, 1.0)
+            ratio = 1.0 - ((gy - py) / float(max(ph, 1)))
+            ratio = max(0.0, min(1.0, ratio))
+            return ratio, pseudo_box, "geometry"
+
+        return 0.0, None, None
