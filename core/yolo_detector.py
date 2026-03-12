@@ -4,10 +4,12 @@ YOLO 目标检测器
 封装 ultralytics YOLO 推理，提供与模板匹配 Detector 兼容的接口。
 
 检测类别:
-  0 = fish     (鱼图标)      → 返回 (x, y, w, h, conf)
-  1 = bar      (白色捕捉条)  → 返回 (x, y, w, h, conf)
-  2 = track    (钓鱼轨道)    → 返回 (x, y, w, h, conf)
-  3 = progress (绿色进度条)  → 返回 (x, y, w, h, conf)
+  0 = fish_generic / 旧 fish
+  1-9 = fish_* 多颜色鱼
+  10 = bar
+  11 = track
+  12 = progress
+  13 = prog_hook
 """
 
 import os
@@ -139,6 +141,7 @@ class YoloDetector:
             "bar": None,
             "track": None,
             "progress": None,
+            "prog_hook": None,
             "fish_name": "",
             "raw": [],
         }
@@ -178,6 +181,9 @@ class YoloDetector:
             elif class_name == "progress":
                 if detections["progress"] is None or conf > detections["progress"][4]:
                     detections["progress"] = det
+            elif class_name == "prog_hook":
+                if detections["prog_hook"] is None or conf > detections["prog_hook"][4]:
+                    detections["prog_hook"] = det
 
         return detections
 

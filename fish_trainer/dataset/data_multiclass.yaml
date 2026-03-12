@@ -1,4 +1,4 @@
-path: ./yolo/dataset
+path: ./fish_trainer/dataset
 train: images/train
 val: images/val
 
@@ -16,4 +16,3 @@ names:
   10: bar
   11: track
   12: progress
-  13: prog_hook

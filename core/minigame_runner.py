@@ -51,7 +51,7 @@ class MinigameRunner:
                 if pipe_data is None:
                     continue
                 (screen_raw, screen,
-                 pipe_fish, pipe_bar, pipe_progress,
+                 pipe_fish, pipe_bar, pipe_progress, pipe_hook,
                  pipe_mk, pipe_bs, _pipe_track) = pipe_data
 
                 elapsed = time.time() - runtime.minigame_start
@@ -95,9 +95,10 @@ class MinigameRunner:
                 fish = pipe_fish
                 bar = pipe_bar
                 yolo_progress = pipe_progress
+                prog_hook = pipe_hook
                 fish, bar, yolo_progress = bot._postprocess_minigame_detection(
                     screen, screen_raw,
-                    fish, bar, pipe_mk, pipe_bs, yolo_progress,
+                    fish, bar, pipe_mk, pipe_bs, yolo_progress, prog_hook,
                     runtime, ctx
                 )
 
@@ -111,7 +112,8 @@ class MinigameRunner:
                     continue
 
                 green = bot._compute_minigame_progress(
-                    screen, fish, bar, yolo_progress, runtime, ctx
+                    screen, screen_raw, fish, bar, yolo_progress,
+                    prog_hook, runtime, ctx
                 )
 
                 end_state = bot._evaluate_minigame_end_state(

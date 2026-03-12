@@ -41,7 +41,7 @@ class DebugOverlay:
                 self._fps = (len(self._frame_times) - 1) / dt
 
     def show(self, screen, fish=None, bar=None, search_region=None,
-             bar_search_region=None, progress=None, status_text="",
+             bar_search_region=None, progress=None, prog_hook=None, status_text="",
              *, state="", running=False, need_rotation=False,
              track_angle=0.0, current_fish_name="",
              fish_display=None, bar_velocity=0.0):
@@ -195,6 +195,31 @@ class DebugOverlay:
             cv2.putText(
                 debug, "Progress", (sx(px), sy(py) - 5),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 180), 1
+            )
+
+        if prog_hook is not None:
+            hx, hy, hw, hh = prog_hook[:4]
+            hook_cx = hx + hw // 2
+            hook_cy = hy + hh // 2
+            draw_w = max(10, int(hw * scale))
+            draw_h = max(10, int(hh * scale))
+            left = sx(hook_cx) - draw_w // 2
+            top = sy(hook_cy) - draw_h // 2
+            right = left + draw_w
+            bottom = top + draw_h
+            color = (255, 0, 255)
+            cv2.rectangle(debug, (left, top), (right, bottom), color, 2)
+            cv2.drawMarker(
+                debug,
+                (sx(hook_cx), sy(hook_cy)),
+                color,
+                markerType=cv2.MARKER_CROSS,
+                markerSize=12,
+                thickness=2,
+            )
+            cv2.putText(
+                debug, "Hook", (left, top - 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1
             )
 
         if fish is not None and bar is not None:

@@ -1,7 +1,7 @@
 """
-YOLO 多颜色鱼训练数据采集
-==========================
-保留 yolo 命令入口，但统一到多颜色鱼训练流程。
+多颜色鱼训练数据采集
+====================
+独立于主程序 YOLO 目录，截图保存到 `fish_trainer/dataset/images/unlabeled/`。
 """
 
 import argparse
@@ -17,12 +17,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from core.screen import ScreenCapture
 from core.window import WindowManager
-from yolo.console import safe_print
-from yolo.paths import UNLABELED, ensure_dataset_dirs
+from fish_trainer.console import safe_print
+from fish_trainer.paths import UNLABELED, ensure_dataset_dirs
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="YOLO 多颜色鱼训练数据采集")
+    parser = argparse.ArgumentParser(description="多颜色鱼训练数据采集")
     parser.add_argument("--fps", type=float, default=2.0, help="每秒截图数")
     parser.add_argument("--roi", action="store_true", help="只截取已保存的 ROI")
     parser.add_argument("--max", type=int, default=0, help="最大截图数量，0 表示无限")

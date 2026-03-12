@@ -1,7 +1,7 @@
 """
-YOLO 多颜色鱼标注工具
-======================
-保留 yolo 命令入口，但统一使用多颜色鱼类别体系。
+多颜色鱼标注工具
+================
+支持多颜色鱼、bar、track、progress，并兼容旧 `fish` 单类标注。
 """
 
 import argparse
@@ -14,7 +14,7 @@ import cv2
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from yolo.classes import (
+from fish_trainer.classes import (
     CLASS_COLORS,
     CLASS_NAMES,
     CLASS_SHORTCUTS,
@@ -22,8 +22,8 @@ from yolo.classes import (
     KEY_TO_CLASS,
     OVERLAY_NAMES,
 )
-from yolo.console import safe_print
-from yolo.paths import TRAIN_IMG, TRAIN_LBL, UNLABELED, VAL_IMG, VAL_LBL, ensure_dataset_dirs
+from fish_trainer.console import safe_print
+from fish_trainer.paths import TRAIN_IMG, TRAIN_LBL, UNLABELED, VAL_IMG, VAL_LBL, ensure_dataset_dirs
 
 drawing = False
 ix = iy = 0
@@ -35,14 +35,14 @@ img_orig = None
 
 def short_help():
     return (
-        "[F]=generic [1-9]=fish colors [B]=bar [T]=track [P]=progress [K]=hook "
+        "[F]=generic [1-9]=fish colors [B]=bar [T]=track [P]=progress "
         "[N/M]=prev/next [Z]=undo [X]=clear [H]=help [S]=save [D]=skip [Q]=quit"
     )
 
 
 def print_help():
     safe_print("=" * 72)
-    safe_print("  YOLO 多颜色鱼标注快捷键")
+    safe_print("  多颜色鱼标注快捷键")
     safe_print("=" * 72)
     for cls_id in sorted(CLASS_NAMES):
         safe_print(
@@ -112,7 +112,7 @@ def mouse_cb(event, x, y, flags, param):
         tmp = img_display.copy()
         color = CLASS_COLORS.get(current_class, (128, 128, 128))
         cv2.rectangle(tmp, (ix, iy), (x, y), color, 2)
-        cv2.imshow("YOLO Label Tool", tmp)
+        cv2.imshow("Fish Trainer Label Tool", tmp)
     elif event == cv2.EVENT_LBUTTONUP:
         drawing = False
         x1, y1 = min(ix, x), min(iy, y)
@@ -120,7 +120,7 @@ def mouse_cb(event, x, y, flags, param):
         if x2 - x1 > 5 and y2 - y1 > 5:
             boxes.append((current_class, x1, y1, x2, y2))
             draw_overlay()
-            cv2.imshow("YOLO Label Tool", img_display)
+            cv2.imshow("Fish Trainer Label Tool", img_display)
 
 
 def load_existing_labels(lbl_path, img_w, img_h):
@@ -156,8 +156,8 @@ def write_yolo_labels(lbl_path):
 def label_loop(file_pairs, save_func, mode_name):
     global current_class, boxes, img_orig
 
-    cv2.namedWindow("YOLO Label Tool", cv2.WINDOW_NORMAL)
-    cv2.setMouseCallback("YOLO Label Tool", mouse_cb)
+    cv2.namedWindow("Fish Trainer Label Tool", cv2.WINDOW_NORMAL)
+    cv2.setMouseCallback("Fish Trainer Label Tool", mouse_cb)
     print_help()
 
     labeled = 0
@@ -169,9 +169,9 @@ def label_loop(file_pairs, save_func, mode_name):
         boxes = load_existing_labels(lbl_path, w, h) if lbl_path else []
         current_class = 12 if boxes else 0
 
-        cv2.resizeWindow("YOLO Label Tool", min(w, 1280), int(h * min(w, 1280) / w))
+        cv2.resizeWindow("Fish Trainer Label Tool", min(w, 1280), int(h * min(w, 1280) / w))
         draw_overlay()
-        cv2.imshow("YOLO Label Tool", img_display)
+        cv2.imshow("Fish Trainer Label Tool", img_display)
 
         safe_print(f"[{idx + 1}/{len(file_pairs)}] {os.path.basename(img_path)} ({w}x{h})")
         while True:
@@ -182,28 +182,28 @@ def label_loop(file_pairs, save_func, mode_name):
                 current_class = KEY_TO_CLASS[lower_key]
                 safe_print(f"    类别 -> {DISPLAY_NAMES.get(current_class)} ({CLASS_NAMES.get(current_class)})")
                 draw_overlay()
-                cv2.imshow("YOLO Label Tool", img_display)
+                cv2.imshow("Fish Trainer Label Tool", img_display)
             elif key in (ord("n"), ord("N")):
                 current_class = (current_class + 1) % len(CLASS_NAMES)
                 safe_print(f"    类别 -> {DISPLAY_NAMES.get(current_class)} ({CLASS_NAMES.get(current_class)})")
                 draw_overlay()
-                cv2.imshow("YOLO Label Tool", img_display)
+                cv2.imshow("Fish Trainer Label Tool", img_display)
             elif key in (ord("m"), ord("M")):
                 current_class = (current_class - 1) % len(CLASS_NAMES)
                 safe_print(f"    类别 -> {DISPLAY_NAMES.get(current_class)} ({CLASS_NAMES.get(current_class)})")
                 draw_overlay()
-                cv2.imshow("YOLO Label Tool", img_display)
+                cv2.imshow("Fish Trainer Label Tool", img_display)
             elif key in (ord("z"), ord("Z")):
                 if boxes:
                     removed = boxes.pop()
                     safe_print(f"    撤销: {DISPLAY_NAMES.get(removed[0], '?')}")
                     draw_overlay()
-                    cv2.imshow("YOLO Label Tool", img_display)
+                    cv2.imshow("Fish Trainer Label Tool", img_display)
             elif key in (ord("x"), ord("X")):
                 boxes.clear()
                 safe_print("    已清空当前图片全部标注")
                 draw_overlay()
-                cv2.imshow("YOLO Label Tool", img_display)
+                cv2.imshow("Fish Trainer Label Tool", img_display)
             elif key in (ord("h"), ord("H")):
                 print_help()
             elif key in (ord("s"), ord("S"), 13):
@@ -227,7 +227,7 @@ def label_loop(file_pairs, save_func, mode_name):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="YOLO 多颜色鱼标注工具")
+    parser = argparse.ArgumentParser(description="多颜色鱼标注工具")
     parser.add_argument("--split", type=float, default=0.2, help="验证集比例")
     parser.add_argument("--relabel", action="store_true", help="重新标注已有 train/val 数据")
     return parser

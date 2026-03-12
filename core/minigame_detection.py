@@ -17,6 +17,7 @@ class DetectionResult:
     fish: tuple | None = None
     bar: tuple | None = None
     progress: tuple | None = None
+    prog_hook: tuple | None = None
     matched_key: str | None = None
     bar_scale: float = 1.0
     track_det: tuple | None = None
@@ -27,6 +28,7 @@ class DetectionResult:
             self.fish,
             self.bar,
             self.progress,
+            self.prog_hook,
             self.matched_key,
             self.bar_scale,
             self.track_det,
@@ -77,7 +79,8 @@ class MinigameDetectionService:
                 local_track = frame_result.track_cache
                 det = (
                     raw, scr,
-                    frame_result.fish, frame_result.bar, frame_result.progress,
+                    frame_result.fish, frame_result.bar,
+                    frame_result.progress, frame_result.prog_hook,
                     frame_result.matched_key, frame_result.bar_scale,
                     frame_result.track_det,
                 )
@@ -102,7 +105,7 @@ class MinigameDetectionService:
                      yolo_roi, skip_success: bool,
                      track_cache=None) -> DetectionResult:
         """单帧检测，返回统一结构化结果。"""
-        fish = bar = progress = None
+        fish = bar = progress = prog_hook = None
         matched_key = None
         bar_scale = 1.0
         track_det = None
@@ -113,6 +116,8 @@ class MinigameDetectionService:
                 det = yolo.detect(scr, roi=yolo_roi)
                 fish = det.get("fish")
                 bar = det.get("bar")
+                prog_hook = det.get("prog_hook")
+                matched_key = det.get("fish_name") or None
                 track_det = det.get("track")
                 if not skip_success:
                     progress = det.get("progress")
@@ -120,6 +125,7 @@ class MinigameDetectionService:
                 fish=fish,
                 bar=bar,
                 progress=progress,
+                prog_hook=prog_hook,
                 matched_key=matched_key,
                 bar_scale=bar_scale,
                 track_det=track_det,
@@ -179,6 +185,7 @@ class MinigameDetectionService:
             fish=fish,
             bar=bar,
             progress=progress,
+            prog_hook=prog_hook,
             matched_key=matched_key,
             bar_scale=bar_scale,
             track_det=track_det,

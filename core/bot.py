@@ -730,7 +730,7 @@ class FishingBot:
             screen = (self._rotate_for_detection(screen_raw)
                       if self._need_rotation else screen_raw)
             self._tick_fps()
-            (pipe_fish, pipe_bar, pipe_progress,
+            (pipe_fish, pipe_bar, pipe_progress, pipe_hook,
              pipe_mk, pipe_bs, pipe_track,
              ctx.sync_track_cache) = self._detect_frame_once(
                 screen, ctx.use_yolo,
@@ -744,7 +744,7 @@ class FishingBot:
             runtime.frame = next_frame
             return (
                 screen_raw, screen, pipe_fish, pipe_bar,
-                pipe_progress, pipe_mk, pipe_bs, pipe_track
+                pipe_progress, pipe_hook, pipe_mk, pipe_bs, pipe_track
             )
 
         try:
@@ -776,7 +776,7 @@ class FishingBot:
 
     def _postprocess_minigame_detection(self, screen, screen_raw,
                                         fish, bar, matched_key, bar_scale,
-                                        yolo_progress,
+                                        yolo_progress, prog_hook,
                                         runtime: MinigameRuntime,
                                         ctx: DetectionContext):
         """处理一帧检测结果的模板锁定、轨道约束与调试显示。"""
@@ -784,14 +784,17 @@ class FishingBot:
 
         if ctx.use_yolo:
             if fish is not None:
-                save_debug = not runtime.fish_id_saved
-                color_key = self.detector.identify_fish_type(
-                    screen, fish, debug_save=save_debug
-                )
-                if save_debug:
-                    runtime.fish_id_saved = True
-                matched_key = color_key
-                fish_detect_name = color_key
+                # 多分类 YOLO 模型直接输出 fish_name，只有旧模型才回退颜色识别。
+                fish_detect_name = matched_key or ""
+                if not fish_detect_name:
+                    save_debug = not runtime.fish_id_saved
+                    color_key = self.detector.identify_fish_type(
+                        screen, fish, debug_save=save_debug
+                    )
+                    if save_debug:
+                        runtime.fish_id_saved = True
+                    matched_key = color_key
+                    fish_detect_name = color_key
 
             if config.YOLO_COLLECT and runtime.frame % 10 == 0:
                 collect_dir = os.path.join(
@@ -939,6 +942,7 @@ class FishingBot:
                 screen_raw, fish, bar, display_sr,
                 bar_search_region=ctx.bar_search_region,
                 progress=None if ctx.skip_success_check else yolo_progress,
+                prog_hook=prog_hook,
                 status_text=f"🐟 小游戏 F{runtime.frame:04d}"
             )
         else:
@@ -947,6 +951,7 @@ class FishingBot:
                 search_region=display_sr,
                 bar_search_region=ctx.bar_search_region,
                 progress=None if ctx.skip_success_check else yolo_progress,
+                prog_hook=prog_hook,
                 status_text=(
                     f"🐟 小游戏 F{runtime.frame:04d} "
                     f"(旋转{self._track_angle:.0f}°补偿中)"
@@ -955,7 +960,8 @@ class FishingBot:
 
         return fish, bar, yolo_progress
 
-    def _compute_minigame_progress(self, screen, fish, bar, yolo_progress,
+    def _compute_minigame_progress(self, screen, screen_raw,
+                                   fish, bar, yolo_progress, prog_hook,
                                    runtime: MinigameRuntime,
                                    ctx: DetectionContext) -> float:
         """统计当前进度条绿色占比。"""
@@ -965,31 +971,53 @@ class FishingBot:
 
         if ctx.use_yolo and yolo_progress is not None:
             px, py, pw, ph = yolo_progress[:4]
-            pad_x = max(1, int(pw * 0.08))
-            pad_y = max(1, int(ph * 0.05))
-            sx = px + pad_x
-            sy = py + pad_y
-            sw = max(1, pw - pad_x * 2)
-            sh = max(1, ph - pad_y * 2)
-            green = self.detector.detect_green_ratio(screen, (sx, sy, sw, sh))
-            if not self._progress_debug_saved and green > 0:
-                self._progress_debug_saved = True
-                pad = 20
-                dx = max(0, px - pad)
-                dw = min(pw + pad * 2, ctx.width - dx)
-                dbg = screen[py:py + ph, dx:dx + dw].copy()
-                cv2.rectangle(
-                    dbg, (sx - dx, sy - py),
-                    (sx - dx + sw, sy - py + sh), (0, 255, 0), 1
-                )
-                info = f"green={green:.0%} roi={sw}x{sh}"
-                cv2.putText(
-                    dbg, info, (2, 16),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1
-                )
-                debug_dir = os.path.join(config.BASE_DIR, "debug")
-                os.makedirs(debug_dir, exist_ok=True)
-                cv2.imwrite(os.path.join(debug_dir, "progress_strip.png"), dbg)
+            green, hook_box, hook_source = self.detector.estimate_progress_in_box(
+                screen, yolo_progress
+            )
+            if hook_box is not None:
+                prog_hook = hook_box
+                if runtime.frame % 10 == 0:
+                    hx, hy, hw, hh, hconf = hook_box
+                    log.info(
+                        f"[Hook] F{runtime.frame:04d} progress=({px},{py},{pw},{ph}) "
+                        f"{hook_source}=({hx},{hy},{hw},{hh}) conf={hconf:.2f} "
+                        f"ratio={green:.0%}"
+                    )
+            else:
+                pad_x = max(1, int(pw * 0.08))
+                pad_y = max(1, int(ph * 0.05))
+                sx = px + pad_x
+                sy = py + pad_y
+                sw = max(1, pw - pad_x * 2)
+                sh = max(1, ph - pad_y * 2)
+                green = self.detector.detect_green_ratio(screen, (sx, sy, sw, sh))
+                if not self._progress_debug_saved and green > 0:
+                    self._progress_debug_saved = True
+                    pad = 20
+                    dx = max(0, px - pad)
+                    dw = min(pw + pad * 2, ctx.width - dx)
+                    dbg = screen[py:py + ph, dx:dx + dw].copy()
+                    cv2.rectangle(
+                        dbg, (sx - dx, sy - py),
+                        (sx - dx + sw, sy - py + sh), (0, 255, 0), 1
+                    )
+                    info = f"green={green:.0%} roi={sw}x{sh}"
+                    cv2.putText(
+                        dbg, info, (2, 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1
+                    )
+                    debug_dir = os.path.join(config.BASE_DIR, "debug")
+                    os.makedirs(debug_dir, exist_ok=True)
+                    cv2.imwrite(os.path.join(debug_dir, "progress_strip.png"), dbg)
+
+            display_sr = ctx.search_region or self._auto_roi
+            self._show_debug_overlay(
+                screen_raw, fish, bar, display_sr,
+                bar_search_region=ctx.bar_search_region,
+                progress=yolo_progress,
+                prog_hook=prog_hook,
+                status_text=f"🐟 小游戏 F{runtime.frame:04d}"
+            )
         else:
             progress_sr = ctx.search_region
             if bar is not None:
@@ -1151,7 +1179,7 @@ class FishingBot:
 
     def _show_debug_overlay(self, screen, fish=None, bar=None,
                             search_region=None, bar_search_region=None,
-                            progress=None, status_text=""):
+                            progress=None, prog_hook=None, status_text=""):
         """转发给独立 debug overlay 管理器。"""
         self.debug_overlay.show(
             screen,
@@ -1160,6 +1188,7 @@ class FishingBot:
             search_region=search_region,
             bar_search_region=bar_search_region,
             progress=progress,
+            prog_hook=prog_hook,
             status_text=status_text,
             state=self.state,
             running=self.running,
@@ -1273,10 +1302,42 @@ class FishingBot:
     def _check_progress(self, screen, fish, sr):
         """
         检测进度条（绿色部分）。
-        以白条中心X左侧 5 像素宽窄条检测绿色占比, 避免背景干扰。
+        优先使用鱼钩模板估算进度，失败时回退到绿色窄条检测。
         """
         if sr is None:
             return 0.0
+
+        hook_ratio, hook_box = self.detector.estimate_progress_by_hook(screen, sr)
+        if hook_box is not None:
+            if not self._progress_debug_saved and hook_ratio > 0:
+                self._progress_debug_saved = True
+                pad = 24
+                hx, hy, hw, hh = hook_box[:4]
+                dx = max(0, hx - pad)
+                dy = max(0, sr[1] - pad)
+                dw = min(max(hw + pad * 2, sr[2] + pad * 2), screen.shape[1] - dx)
+                dh = min(sr[3] + pad * 2, screen.shape[0] - dy)
+                dbg = screen[dy:dy + dh, dx:dx + dw].copy()
+                cv2.rectangle(
+                    dbg,
+                    (hx - dx, hy - dy),
+                    (hx - dx + hw, hy - dy + hh),
+                    (255, 255, 255),
+                    1,
+                )
+                cv2.putText(
+                    dbg,
+                    f"hook={hook_ratio:.0%}",
+                    (2, 16),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    (0, 255, 255),
+                    1,
+                )
+                debug_dir = os.path.join(config.BASE_DIR, "debug")
+                os.makedirs(debug_dir, exist_ok=True)
+                cv2.imwrite(os.path.join(debug_dir, "progress_hook.png"), dbg)
+            return hook_ratio
 
         bar_cx = self._bar_locked_cx
         if bar_cx is None:
