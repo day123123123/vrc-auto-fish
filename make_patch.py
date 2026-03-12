@@ -16,6 +16,10 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 APP_DIRS = ['core', 'gui', 'utils']
 APP_FILES = ['config.py', 'main.py']
 RESOURCE_DIRS = ['img']
+RESOURCE_FILES = [
+    os.path.join('yolo', 'runs', 'fish_detect', 'weights', 'best.pt'),
+    os.path.join('imitation', 'policy.pt'),
+]
 
 EXCLUDE = {'__pycache__', '.pyc', '.pyo', '.bak'}
 
@@ -66,6 +70,15 @@ def make_patch():
                     zf.write(full, os.path.join('patch', rel))
                     count += 1
 
+        for rel_path in RESOURCE_FILES:
+            src = os.path.join(ROOT, rel_path)
+            if not os.path.isfile(src):
+                continue
+            if not should_include(src):
+                continue
+            zf.write(src, os.path.join('patch', rel_path))
+            count += 1
+
     size_kb = os.path.getsize(zip_path) / 1024
     print(f'补丁已生成: {zip_name}')
     print(f'  包含 {count} 个文件, {size_kb:.0f} KB')
@@ -73,6 +86,7 @@ def make_patch():
     print('使用方法:')
     print('  将 zip 解压到 VRChat钓鱼助手.exe 同级目录')
     print('  确保生成了 patch/ 文件夹即可')
+    print('  若 zip 中包含 yolo/runs/.../best.pt，则会优先覆盖内置模型')
 
 
 if __name__ == '__main__':

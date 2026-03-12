@@ -33,6 +33,10 @@ class MinigameRuntime:
     prev_green: float = 0.0
     minigame_start: float = field(default_factory=time.time)
     progress_skip_frames: int = 20
+    fish_name_pending: str = ""
+    fish_name_pending_frames: int = 0
+    blocked_fish_pending: str = ""
+    blocked_fish_pending_frames: int = 0
 
 
 @dataclass
@@ -62,8 +66,8 @@ class PipelineContext:
     sync_pd_mode: bool
     frame_q: queue.Queue | None = None
     result_q: queue.Queue | None = None
-    stop_evt: threading.Event | None = None
+    stop_evt: Any = None
     shared_params: dict[str, Any] | None = None
-    params_lock: threading.Lock | None = None
+    params_lock: Any = None
     capture_thread: threading.Thread | None = None
     detect_thread: threading.Thread | None = None

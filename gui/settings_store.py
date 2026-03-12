@@ -8,6 +8,7 @@ import json
 import os
 
 import config
+from utils.i18n import set_language
 
 
 class AppSettingsStore:
@@ -86,7 +87,7 @@ class AppSettingsStore:
 
         if changed:
             self.save()
-            self.app._log_msg(f"[参数] 已更新并保存: {', '.join(changed)}")
+            self.app._log_t("log.paramsSaved", changes=", ".join(changed))
 
     def reset_params(self):
         """恢复当前参数为默认值，但保留已保存的预设。"""
@@ -95,7 +96,7 @@ class AppSettingsStore:
         self.refresh_param_widgets()
         self.reset_extra_settings()
         self.save()
-        self.app._log_msg("[参数] 已恢复默认值")
+        self.app._log_t("log.paramsReset")
 
     def reset_extra_settings(self):
         for attr, value in self.app.SETTINGS_DEFAULTS.items():
@@ -176,6 +177,16 @@ class AppSettingsStore:
                     self.app.lbl_roi.config(foreground="green")
             else:
                 config.DETECT_ROI = None
+            return True
+
+        if attr == "LANGUAGE":
+            config.LANGUAGE = set_language(str(val))
+            if hasattr(self.app, "_update_window_title"):
+                self.app._update_window_title()
+            if hasattr(self.app, "_refresh_language_choices"):
+                self.app._refresh_language_choices()
+            if hasattr(self.app, "_rebuild_ui_for_language"):
+                self.app._rebuild_ui_for_language()
             return True
 
         if attr == "YOLO_COLLECT":

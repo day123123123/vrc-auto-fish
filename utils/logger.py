@@ -9,6 +9,8 @@ import sys
 import time
 import queue
 
+from utils.i18n import t
+
 
 class Logger:
     """日志器 — 控制台打印 + queue 推送 + 内存缓存(供保存)"""
@@ -20,14 +22,26 @@ class Logger:
     def info(self, msg: str):
         self._emit("INFO", msg)
 
+    def info_t(self, key: str, **kwargs):
+        self._emit("INFO", t(key, **kwargs))
+
     def warning(self, msg: str):
         self._emit("WARN", msg)
+
+    def warning_t(self, key: str, **kwargs):
+        self._emit("WARN", t(key, **kwargs))
 
     def error(self, msg: str):
         self._emit("ERROR", msg)
 
+    def error_t(self, key: str, **kwargs):
+        self._emit("ERROR", t(key, **kwargs))
+
     def debug(self, msg: str):
         self._emit("DEBUG", msg)
+
+    def debug_t(self, key: str, **kwargs):
+        self._emit("DEBUG", t(key, **kwargs))
 
     def _emit(self, level: str, msg: str):
         ts = time.strftime("%H:%M:%S")

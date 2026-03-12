@@ -24,24 +24,24 @@ class ReelExitHandler:
         """根据本局结果解析成功/失败。"""
         if skip_fish:
             if skip_success_check:
-                log.info("[⏭ 跳过] 非目标鱼, 已放弃")
+                log.info_t("reel.log.skipNoCheck")
             else:
-                log.info(
-                    f"[⏭ 跳过] 非目标鱼, 已放弃 (进度 {last_green:.0%} 不计)"
-                )
+                log.info_t("reel.log.skipWithProgress", progress=last_green)
             return False
         if skip_success_check:
-            log.info("[✅ 完成] 已跳过成功检查，不再判定最终进度")
+            log.info_t("reel.log.completeNoCheck")
             return True
         if last_green > config.SUCCESS_PROGRESS:
-            log.info(
-                f"[✅ 成功] 最终进度 {last_green:.0%} > "
-                f"{config.SUCCESS_PROGRESS:.0%}，判定成功"
+            log.info_t(
+                "reel.log.success",
+                progress=last_green,
+                threshold=config.SUCCESS_PROGRESS,
             )
             return True
-        log.info(
-            f"[❌ 失败] 最终进度 {last_green:.0%} <= "
-            f"{config.SUCCESS_PROGRESS:.0%}，判定失败"
+        log.info_t(
+            "reel.log.fail",
+            progress=last_green,
+            threshold=config.SUCCESS_PROGRESS,
         )
         return False
 
@@ -54,15 +54,15 @@ class ReelExitHandler:
             if self._wait_with_preempt(0.2, "⏳ 收杆点击前等待", allow_preempt=False):
                 return success
             self.input.click()
-            log.info("[🎣 收杆] 跳过成功检查, 点击收杆")
+            log.info_t("reel.log.clickSkipCheck")
             success = True
         elif success:
             if self._wait_with_preempt(0.2, "⏳ 收杆点击前等待", allow_preempt=False):
                 return success
             self.input.click()
-            log.info("[🎣 收杆] 钓鱼成功, 点击收杆")
+            log.info_t("reel.log.clickSuccess")
         else:
-            log.info("[🎣 失败] 鱼竿已自动收回, 跳过收杆")
+            log.info_t("reel.log.failAutoReel")
 
         ui_gone = self._wait_until_ui_gone(
             timeout=max(config.POST_CATCH_DELAY + 1.0, 3.0)

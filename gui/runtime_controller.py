@@ -12,27 +12,35 @@ from tkinter import ttk
 import cv2
 
 import config
+from utils.i18n import fish_name, t
 from utils.logger import log
 
 
 class AppRuntimeController:
     """封装 FishingApp 的运行时动作。"""
 
-    FISH_NAMES = [
-        ("fish_generic", "通用鱼"),
-        ("fish_black", "黑鱼"),
-        ("fish_white", "白鱼"),
-        ("fish_copper", "铜鱼"),
-        ("fish_green", "绿鱼"),
-        ("fish_blue", "蓝鱼"),
-        ("fish_purple", "紫鱼"),
-        ("fish_pink", "粉鱼"),
-        ("fish_red", "红鱼"),
-        ("fish_rainbow", "彩鱼"),
+    FISH_KEYS = [
+        "fish_generic",
+        "fish_black",
+        "fish_white",
+        "fish_copper",
+        "fish_green",
+        "fish_blue",
+        "fish_purple",
+        "fish_golden",
+        "fish_pink",
+        "fish_red",
+        "fish_rainbow",
     ]
 
     def __init__(self, app):
         self.app = app
+
+    def tr(self, key: str, default: str | None = None, **kwargs):
+        return t(key, default=default, **kwargs)
+
+    def _fish_pairs(self):
+        return [(key, fish_name(key)) for key in self.FISH_KEYS]
 
     @staticmethod
     def has_non_ascii(path: str) -> bool:
@@ -46,13 +54,13 @@ class AppRuntimeController:
         if self.app.bot.running:
             return
         if self.has_non_ascii(config.BASE_DIR):
-            self.app._log_msg("[错误] 程序所在路径包含中文或特殊字符，会导致图片/模型加载失败！")
-            self.app._log_msg(f"  当前路径: {config.BASE_DIR}")
-            self.app._log_msg("  请将程序移动到纯英文路径下再运行，例如: D:\\fish")
+            self.app._log_t("runtime.pathNonAscii")
+            self.app._log_t("runtime.currentPath", path=config.BASE_DIR)
+            self.app._log_t("runtime.moveToAsciiPath")
             return
         if not self.app.bot.window.is_valid():
             if not self.app.bot.window.find():
-                self.app._log_msg("[错误] 未找到 VRChat 窗口！请确保游戏正在运行。")
+                self.app._log_t("runtime.vrchatWindowMissing")
                 return
 
         self.app.var_window.set(
@@ -60,7 +68,7 @@ class AppRuntimeController:
         )
         self.app._apply_params()
         self.app.bot.running = True
-        self.app.bot.state = "运行中"
+        self.app.bot.state = "status.running"
         if self.app.bot_thread is None or not self.app.bot_thread.is_alive():
             self.app.bot_thread = threading.Thread(
                 target=self.app.bot.run, daemon=True
@@ -71,7 +79,7 @@ class AppRuntimeController:
         self.app.btn_stop.config(state="normal")
         self.app.btn_roi.config(state="disabled")
         self.app.btn_clear_roi.config(state="disabled")
-        self.app._log_msg("[系统] ▶ 开始自动钓鱼")
+        self.app._log_t("runtime.startFishing")
 
     def on_stop(self):
         self.app.bot.running = False
@@ -82,16 +90,16 @@ class AppRuntimeController:
         self.app.btn_stop.config(state="disabled")
         self.app.btn_roi.config(state="normal")
         self.app.btn_clear_roi.config(state="normal")
-        self.app._log_msg("[系统] ■ 已停止")
+        self.app._log_t("runtime.stopFishing")
         self.save_log_async()
 
     def on_toggle_debug(self):
         self.app.bot.debug_mode = not self.app.bot.debug_mode
-        tag = "开启" if self.app.bot.debug_mode else "关闭"
+        tag = self.tr("status.on") if self.app.bot.debug_mode else self.tr("status.off")
         self.app.var_debug.set(tag)
-        self.app._log_msg(f"[系统] 调试模式: {tag}")
+        self.app._log_t("runtime.debugModeChanged", state=tag)
         if self.app.bot.debug_mode:
-            self.app._log_msg("[提示] 调试截图将保存到 debug/ 目录，检测器将输出置信度")
+            self.app._log_t("runtime.debugHint")
 
     def on_connect(self):
         if self.app.bot.window.find():
@@ -99,33 +107,34 @@ class AppRuntimeController:
                 f"{self.app.bot.window.title} (HWND={self.app.bot.window.hwnd})"
             )
             self.app.bot.screen.reset_capture_method()
-            self.app._log_msg(f"[系统] 已连接: {self.app.bot.window.title}")
+            self.app._log_t("runtime.connected", title=self.app.bot.window.title)
             return
-        self.app.var_window.set("未找到")
-        self.app._log_msg("[错误] 未找到 VRChat 窗口")
+        self.app.var_window.set(self.tr("status.notFound"))
+        self.app._log_t("runtime.windowNotFound")
 
     def screen_capture_safe(self):
         try:
             return self.app.bot.screen.grab_window(self.app.bot.window)
         except Exception as e:
-            self.app._log_msg(f"[错误] 截图异常: {e}")
+            self.app._log_t("runtime.screenshotException", error=e)
             return None, None
 
     def on_screenshot(self):
         if not self.app.bot.window.is_valid():
             if not self.app.bot.window.find():
-                self.app._log_msg("[错误] 无法截图: 未连接 VRChat 窗口")
+                self.app._log_t("runtime.screenshotWindowMissing")
                 return
         img, region = self.screen_capture_safe()
         if img is None:
-            self.app._log_msg("[错误] 截图失败")
+            self.app._log_t("runtime.screenshotFailed")
             return
         self.app.bot.screen.save_debug(img, "manual_screenshot")
         h, w = img.shape[:2]
-        self.app._log_msg(f"[截图] 已保存 ({w}×{h}) → debug/manual_screenshot.png")
+        self.app._log_t("runtime.screenshotSaved", width=w, height=h)
         if region:
-            self.app._log_msg(
-                f"       窗口区域: x={region[0]} y={region[1]} w={region[2]} h={region[3]}"
+            self.app._log_t(
+                "runtime.windowRegion",
+                x=region[0], y=region[1], w=region[2], h=region[3]
             )
 
     def on_clear_log(self):
@@ -135,11 +144,11 @@ class AppRuntimeController:
 
     def on_whitelist(self):
         win = tk.Toplevel(self.app.root)
-        win.title("钓鱼白名单")
+        win.title(self.tr("runtime.whitelistTitle"))
         win.resizable(False, False)
         win.transient(self.app.root)
         win.grab_set()
-        ttk.Label(win, text="勾选要钓的鱼:").pack(pady=(10, 5))
+        ttk.Label(win, text=self.tr("runtime.whitelistPrompt")).pack(pady=(10, 5))
 
         wl = config.FISH_WHITELIST
         chk_vars = {}
@@ -148,7 +157,7 @@ class AppRuntimeController:
         for col in range(2):
             body.columnconfigure(col, weight=1)
 
-        for i, (key, name) in enumerate(self.FISH_NAMES):
+        for i, (key, name) in enumerate(self._fish_pairs()):
             var = tk.BooleanVar(value=wl.get(key, True))
             chk_vars[key] = var
             row = i // 2
@@ -161,11 +170,11 @@ class AppRuntimeController:
             for key, var in chk_vars.items():
                 config.FISH_WHITELIST[key] = var.get()
             self.app._save_settings()
-            enabled = [n for (k, n) in self.FISH_NAMES if chk_vars[k].get()]
-            self.app._log_msg(f"[白名单] 已更新: {', '.join(enabled)}")
+            enabled = [n for (k, n) in self._fish_pairs() if chk_vars[k].get()]
+            self.app._log_t("runtime.whitelistUpdated", names=", ".join(enabled))
             win.destroy()
 
-        ttk.Button(win, text="确定", command=apply_changes).pack(pady=10)
+        ttk.Button(win, text=self.tr("runtime.confirm"), command=apply_changes).pack(pady=10)
         win.update_idletasks()
         req_w = max(win.winfo_reqwidth() + 20, 260)
         req_h = max(win.winfo_reqheight() + 10, 240)
@@ -190,7 +199,7 @@ class AppRuntimeController:
                 from core.bot import _get_yolo_detector
                 self.app.bot.yolo = _get_yolo_detector()
             except Exception as e:
-                self.app._log_msg(f"[YOLO] 预加载失败: {e}")
+                self.app._log_t("runtime.yoloPreloadFailed", error=e)
 
         threading.Thread(target=load, daemon=True).start()
 
@@ -210,25 +219,27 @@ class AppRuntimeController:
             if f.endswith((".png", ".jpg"))
         ]) if os.path.isdir(train) else 0
 
-        parts = ["模型 ✓" if model_ok else "模型 ✗", f"训练:{n_train}", f"未标:{n_unlabeled}"]
+        parts = [
+            self.tr("yolo.modelOk") if model_ok else self.tr("yolo.modelMissing"),
+            self.tr("yolo.trainCount", count=n_train),
+            self.tr("yolo.unlabeledCount", count=n_unlabeled),
+        ]
         self.app.var_yolo_status.set(" | ".join(parts))
 
     def on_select_roi(self):
         if not self.app.bot.window.is_valid():
             if not self.app.bot.window.find():
-                self.app._log_msg("[错误] 请先连接 VRChat 窗口")
+                self.app._log_t("runtime.connectFirst")
                 return
         img, _ = self.screen_capture_safe()
         if img is None:
-            self.app._log_msg("[错误] 截图失败, 无法框选")
+            self.app._log_t("runtime.roiCaptureFailed")
             return
 
-        self.app._log_msg(
-            "[框选] 请在弹出窗口中用鼠标框选钓鱼UI区域, 按回车确认, 按ESC取消"
-        )
+        self.app._log_t("runtime.roiPrompt")
 
         def select_worker(snap):
-            win_name = "Select Fishing ROI - Enter=OK / Esc=Cancel"
+            win_name = self.tr("runtime.roiSelectWindow")
             cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
             h, w = snap.shape[:2]
             dw = min(w, 1280)
@@ -242,18 +253,18 @@ class AppRuntimeController:
                 self.app._save_settings()
                 self.app.root.after(0, lambda: self.app.var_roi.set(f"X={x} Y={y} {w_r}x{h_r}"))
                 self.app.root.after(0, lambda: self.app.lbl_roi.config(foreground="green"))
-                self.app._log_msg(f"[框选] ✓ 检测区域已设置: X={x} Y={y} {w_r}x{h_r}")
+                self.app._log_t("runtime.roiSet", x=x, y=y, w=w_r, h=h_r)
             else:
-                self.app._log_msg("[框选] 已取消 (区域太小或按了ESC)")
+                self.app._log_t("runtime.roiCancelled")
 
         threading.Thread(target=select_worker, args=(img,), daemon=True, name="ROISelect").start()
 
     def on_clear_roi(self):
         config.DETECT_ROI = None
         self.app._save_settings()
-        self.app.var_roi.set("未设置 (全屏搜索)")
+        self.app.var_roi.set(self.tr("toggle.roiUnset"))
         self.app.lbl_roi.config(foreground="gray")
-        self.app._log_msg("[框选] 已清除检测区域, 将使用全屏搜索")
+        self.app._log_t("runtime.roiCleared")
 
     def poll(self):
         try:
@@ -263,8 +274,11 @@ class AppRuntimeController:
         except Exception:
             pass
 
-        self.app.var_state.set(self.app.bot.state)
+        self.app.var_state.set(self.app._translate_bot_state(self.app.bot.state))
         self.app.var_count.set(str(self.app.bot.fish_count))
+        self.app.var_debug.set(
+            self.tr("status.on") if self.app.bot.debug_mode else self.tr("status.off")
+        )
         self.app.lbl_state.config(
             foreground="green" if self.app.bot.running else "gray"
         )
@@ -290,7 +304,7 @@ class AppRuntimeController:
     def save_log(self):
         path = os.path.join(config.DEBUG_DIR, "last_run.log")
         log.save(path)
-        self.app._log_msg(f"[系统] 日志已保存 → {path}")
+        self.app._log_t("runtime.logSaved", path=path)
 
     def save_log_async(self):
         path = os.path.join(config.DEBUG_DIR, "last_run.log")
@@ -298,7 +312,7 @@ class AppRuntimeController:
         def worker():
             log.save(path)
             try:
-                self.app.root.after(0, lambda: self.app._log_msg(f"[系统] 日志已保存 → {path}"))
+                self.app.root.after(0, lambda: self.app._log_t("runtime.logSaved", path=path))
             except Exception:
                 pass
 

@@ -7,6 +7,7 @@
 import time
 
 import config
+from utils.i18n import t
 from utils.logger import log
 
 
@@ -41,19 +42,17 @@ class MinigameEndJudge:
             if runtime.no_detect >= config.VERIFY_FRAMES:
                 if rescue("连续丢失结束判定"):
                     return "continue"
-                log.info(
-                    f"[📋 结束] 连续{runtime.no_detect}帧未检测到有效UI，"
-                    f"达到结束帧数 {config.VERIFY_FRAMES}"
+                log.info_t(
+                    "endJudge.log.noUiEnd",
+                    count=runtime.no_detect,
+                    limit=config.VERIFY_FRAMES,
                 )
                 return "break"
             time.sleep(config.GAME_LOOP_INTERVAL)
             return "continue"
 
         if runtime.no_detect > 5:
-            log.info(
-                f"[✓ 恢复] 重新检测到有效UI "
-                f"(之前丢失{runtime.no_detect}帧)"
-            )
+            log.info_t("endJudge.log.uiRecovered", count=runtime.no_detect)
         runtime.no_detect = 0
 
         if fish is None:
@@ -61,11 +60,11 @@ class MinigameEndJudge:
             if runtime.fish_gone_since is None:
                 runtime.fish_gone_since = time.time()
             if runtime.fish_lost == 30:
-                log.warning(f"[⚠ 鱼丢失] 连续{runtime.fish_lost}帧未检测到鱼")
+                log.warning_t("endJudge.log.fishLostWarning", count=runtime.fish_lost)
             if runtime.had_good_detection and runtime.fish_lost > config.FISH_LOST_LIMIT:
                 if rescue("鱼丢失结束判定"):
                     return "continue"
-                log.info(f"[📋 结束] 鱼已消失{runtime.fish_lost}帧，直接判定结束")
+                log.info_t("endJudge.log.fishLostEnd", count=runtime.fish_lost)
                 return "break"
         else:
             runtime.fish_lost = 0
@@ -85,14 +84,14 @@ class MinigameEndJudge:
             if rescue("鱼消失超时判定"):
                 return "continue"
             elapsed = now_t - runtime.fish_gone_since
-            log.info(f"[📋 失败] 鱼连续消失 {elapsed:.1f}s, 直接判定结束")
+            log.info_t("endJudge.log.fishTimeout", elapsed=elapsed)
             return "break"
         if (runtime.had_good_detection and runtime.bar_gone_since is not None
                 and now_t - runtime.bar_gone_since > timeout):
             if rescue("白条消失超时判定"):
                 return "continue"
             elapsed = now_t - runtime.bar_gone_since
-            log.info(f"[📋 失败] 白条连续消失 {elapsed:.1f}s, 直接判定结束")
+            log.info_t("endJudge.log.barTimeout", elapsed=elapsed)
             return "break"
 
         if obj_count < config.OBJ_MIN_COUNT:
@@ -101,21 +100,29 @@ class MinigameEndJudge:
                 has_f = "鱼✓" if fish is not None else "鱼✗"
                 has_b = "条✓" if bar is not None else "条✗"
                 log.warning(
-                    f"[⚠ 对象不足] {has_f} {has_b} = {obj_count}个 "
-                    f"({runtime.obj_gone_count}/{config.OBJ_GONE_LIMIT})"
+                    t(
+                        "endJudge.log.objInsufficient",
+                        fish=has_f,
+                        bar=has_b,
+                        count=obj_count,
+                        gone=runtime.obj_gone_count,
+                        limit=config.OBJ_GONE_LIMIT,
+                    )
                 )
             if runtime.obj_gone_count >= config.OBJ_GONE_LIMIT:
                 if rescue("对象不足结束判定"):
                     return "continue"
-                log.info(
-                    f"[📋 结束] 连续{runtime.obj_gone_count}帧对象不足,直接判定结束"
+                log.info_t(
+                    "endJudge.log.objInsufficientEnd",
+                    count=runtime.obj_gone_count,
                 )
                 return "break"
         else:
             if runtime.obj_gone_count > 3:
-                log.info(
-                    f"[✓ 恢复] 对象数恢复为{obj_count}"
-                    f" (之前不足{runtime.obj_gone_count}帧)"
+                log.info_t(
+                    "endJudge.log.objRecovered",
+                    count=obj_count,
+                    gone=runtime.obj_gone_count,
                 )
             runtime.obj_gone_count = 0
 

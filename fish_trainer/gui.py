@@ -15,9 +15,11 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import config
 from fish_trainer import collect, label
 from fish_trainer.exporter import build_export_name, export_labeled_dataset, get_dataset_stats
 from fish_trainer.paths import APP_ROOT, BASE, UNLABELED, ensure_dataset_dirs
+from utils.i18n import available_languages, init_language, set_language, t, write_persisted_language
 
 
 def build_parser():
@@ -53,9 +55,13 @@ class FishTrainerGUI:
         self.root = root
         self.collect_proc = None
         self.label_proc = None
+        self._language_code_to_label = {}
+        self._language_label_to_code = {}
 
         ensure_dataset_dirs()
-        self.root.title("Fish Trainer")
+        init_language()
+        self.lang_var = tk.StringVar(value="")
+        self._update_window_title()
         self.root.geometry("760x620")
         self.root.minsize(720, 560)
 
@@ -73,91 +79,134 @@ class FishTrainerGUI:
         self.refresh_stats()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
+    def tr(self, key: str, default: str | None = None, **kwargs):
+        return t(key, default=default, **kwargs)
+
+    def _update_window_title(self):
+        self.root.title(self.tr("trainer.windowTitle"))
+
+    def _refresh_language_choices(self):
+        choices = available_languages()
+        self._language_code_to_label = {code: label for code, label in choices}
+        self._language_label_to_code = {label: code for code, label in choices}
+        self.lang_var.set(self._language_code_to_label.get(config.LANGUAGE, config.LANGUAGE))
+
+    def _rebuild_ui_for_language(self):
+        log_text = ""
+        if hasattr(self, "log_box"):
+            log_text = self.log_box.get("1.0", "end-1c")
+        for child in self.root.winfo_children():
+            child.destroy()
+        self._update_window_title()
+        self._build_ui()
+        self.refresh_stats()
+        if log_text:
+            self.log_box.configure(state="normal")
+            self.log_box.insert("end", log_text + "\n")
+            self.log_box.see("end")
+            self.log_box.configure(state="disabled")
+
+    def _on_language_change(self, _event=None):
+        selected = self.lang_var.get()
+        lang = self._language_label_to_code.get(selected, selected)
+        set_language(lang)
+        write_persisted_language(lang)
+        self._rebuild_ui_for_language()
+        self.log(self.tr("log.languageChanged", language=self._language_code_to_label.get(lang, lang)))
+
     def _build_ui(self):
+        self._refresh_language_choices()
         main = ttk.Frame(self.root, padding=12)
         main.pack(fill="both", expand=True)
         main.columnconfigure(0, weight=1)
         main.rowconfigure(3, weight=1)
 
-        top = ttk.LabelFrame(main, text="数据目录", padding=10)
+        top = ttk.LabelFrame(main, text=self.tr("trainer.frame.paths"), padding=10)
         top.grid(row=0, column=0, sticky="ew")
         top.columnconfigure(1, weight=1)
+        top.columnconfigure(3, weight=1)
 
-        ttk.Label(top, text="工作目录").grid(row=0, column=0, sticky="w")
+        ttk.Label(top, text=self.tr("trainer.label.workdir")).grid(row=0, column=0, sticky="w")
         ttk.Label(top, text=APP_ROOT).grid(row=0, column=1, sticky="w")
-        ttk.Label(top, text="数据目录").grid(row=1, column=0, sticky="w")
+        ttk.Label(top, text=self.tr("trainer.label.datadir")).grid(row=1, column=0, sticky="w")
         ttk.Label(top, text=BASE).grid(row=1, column=1, sticky="w")
+        ttk.Label(top, text=self.tr("toggle.language")).grid(row=0, column=2, sticky="e", padx=(12, 4))
+        cmb_lang = ttk.Combobox(
+            top,
+            textvariable=self.lang_var,
+            values=list(self._language_label_to_code.keys()),
+            state="readonly",
+            width=14,
+        )
+        cmb_lang.grid(row=0, column=3, sticky="w")
+        cmb_lang.bind("<<ComboboxSelected>>", self._on_language_change)
 
-        stats = ttk.LabelFrame(main, text="当前统计", padding=10)
+        stats = ttk.LabelFrame(main, text=self.tr("trainer.frame.stats"), padding=10)
         stats.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         for idx in range(4):
             stats.columnconfigure(idx, weight=1)
 
-        ttk.Label(stats, text="未标注").grid(row=0, column=0, sticky="w")
+        ttk.Label(stats, text=self.tr("trainer.label.unlabeled")).grid(row=0, column=0, sticky="w")
         ttk.Label(stats, textvariable=self.unlabeled_var).grid(row=0, column=1, sticky="w")
-        ttk.Label(stats, text="Train").grid(row=0, column=2, sticky="w")
+        ttk.Label(stats, text=self.tr("trainer.label.train")).grid(row=0, column=2, sticky="w")
         ttk.Label(stats, textvariable=self.train_var).grid(row=0, column=3, sticky="w")
-        ttk.Label(stats, text="Val").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(stats, text=self.tr("trainer.label.val")).grid(row=1, column=0, sticky="w", pady=(6, 0))
         ttk.Label(stats, textvariable=self.val_var).grid(row=1, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(stats, text="可导出配对").grid(row=1, column=2, sticky="w", pady=(6, 0))
+        ttk.Label(stats, text=self.tr("trainer.label.pairs")).grid(row=1, column=2, sticky="w", pady=(6, 0))
         ttk.Label(stats, textvariable=self.pairs_var).grid(row=1, column=3, sticky="w", pady=(6, 0))
 
-        controls = ttk.LabelFrame(main, text="操作", padding=10)
+        controls = ttk.LabelFrame(main, text=self.tr("trainer.frame.controls"), padding=10)
         controls.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         for idx in range(6):
             controls.columnconfigure(idx, weight=1)
 
-        ttk.Label(controls, text="采集 FPS").grid(row=0, column=0, sticky="w")
+        ttk.Label(controls, text=self.tr("trainer.label.collectFps")).grid(row=0, column=0, sticky="w")
         ttk.Entry(controls, textvariable=self.fps_var, width=10).grid(row=0, column=1, sticky="w")
-        ttk.Label(controls, text="最大张数").grid(row=0, column=2, sticky="w")
+        ttk.Label(controls, text=self.tr("trainer.label.maxCount")).grid(row=0, column=2, sticky="w")
         ttk.Entry(controls, textvariable=self.max_var, width=10).grid(row=0, column=3, sticky="w")
-        ttk.Checkbutton(controls, text="仅采集已保存 ROI", variable=self.roi_var).grid(
+        ttk.Checkbutton(controls, text=self.tr("trainer.label.savedRoiOnly"), variable=self.roi_var).grid(
             row=0, column=4, columnspan=2, sticky="w"
         )
 
-        ttk.Button(controls, text="开始采集", command=self.start_collect).grid(
+        ttk.Button(controls, text=self.tr("trainer.button.startCollect"), command=self.start_collect).grid(
             row=1, column=0, sticky="ew", pady=(10, 0)
         )
-        ttk.Button(controls, text="停止采集", command=self.stop_collect).grid(
+        ttk.Button(controls, text=self.tr("trainer.button.stopCollect"), command=self.stop_collect).grid(
             row=1, column=1, sticky="ew", pady=(10, 0)
         )
 
-        ttk.Label(controls, text="验证集比例").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(controls, text=self.tr("trainer.label.split")).grid(row=2, column=0, sticky="w", pady=(10, 0))
         ttk.Entry(controls, textvariable=self.split_var, width=10).grid(
             row=2, column=1, sticky="w", pady=(10, 0)
         )
-        ttk.Button(controls, text="开始标注", command=self.start_label).grid(
+        ttk.Button(controls, text=self.tr("trainer.button.startLabel"), command=self.start_label).grid(
             row=2, column=2, sticky="ew", pady=(10, 0)
         )
-        ttk.Button(controls, text="补标已有数据", command=lambda: self.start_label(relabel=True)).grid(
+        ttk.Button(controls, text=self.tr("trainer.button.relabel"), command=lambda: self.start_label(relabel=True)).grid(
             row=2, column=3, sticky="ew", pady=(10, 0)
         )
 
-        ttk.Button(controls, text="导出图片+标签 zip", command=self.export_zip).grid(
+        ttk.Button(controls, text=self.tr("trainer.button.exportZip"), command=self.export_zip).grid(
             row=3, column=0, columnspan=2, sticky="ew", pady=(10, 0)
         )
-        ttk.Button(controls, text="打开未标注目录", command=lambda: self.open_dir(UNLABELED)).grid(
+        ttk.Button(controls, text=self.tr("trainer.button.openUnlabeled"), command=lambda: self.open_dir(UNLABELED)).grid(
             row=3, column=2, sticky="ew", pady=(10, 0)
         )
-        ttk.Button(controls, text="打开已标注目录", command=lambda: self.open_dir(BASE)).grid(
+        ttk.Button(controls, text=self.tr("trainer.button.openLabeled"), command=lambda: self.open_dir(BASE)).grid(
             row=3, column=3, sticky="ew", pady=(10, 0)
         )
-        ttk.Button(controls, text="刷新统计", command=self.refresh_stats).grid(
+        ttk.Button(controls, text=self.tr("trainer.button.refresh"), command=self.refresh_stats).grid(
             row=3, column=4, sticky="ew", pady=(10, 0)
         )
 
-        tips = ttk.LabelFrame(main, text="说明", padding=10)
+        tips = ttk.LabelFrame(main, text=self.tr("trainer.frame.tips"), padding=10)
         tips.grid(row=3, column=0, sticky="nsew", pady=(10, 0))
         tips.columnconfigure(0, weight=1)
         tips.rowconfigure(1, weight=1)
 
         ttk.Label(
             tips,
-            text=(
-                "1. 先点击“开始采集”截训练图。\n"
-                "2. 再点击“开始标注”进入 OpenCV 标注窗口。\n"
-                "3. 导出按钮会把已标注图片和对应 .txt 标签压成一个 zip，直接发给别人即可。"
-            ),
+            text=self.tr("trainer.tips"),
             justify="left",
         ).grid(row=0, column=0, sticky="w")
 
@@ -173,10 +222,14 @@ class FishTrainerGUI:
 
     def refresh_stats(self):
         stats = get_dataset_stats()
-        self.unlabeled_var.set(f"{stats['unlabeled_images']} 张")
-        self.train_var.set(f"{stats['train_images']} 图 / {stats['train_labels']} 标")
-        self.val_var.set(f"{stats['val_images']} 图 / {stats['val_labels']} 标")
-        self.pairs_var.set(f"{stats['labeled_pairs']} 对")
+        self.unlabeled_var.set(self.tr("trainer.stats.unlabeled", count=stats["unlabeled_images"]))
+        self.train_var.set(
+            self.tr("trainer.stats.train", images=stats["train_images"], labels=stats["train_labels"])
+        )
+        self.val_var.set(
+            self.tr("trainer.stats.val", images=stats["val_images"], labels=stats["val_labels"])
+        )
+        self.pairs_var.set(self.tr("trainer.stats.pairs", count=stats["labeled_pairs"]))
 
     def build_runner_command(self, tool_name, extra_args):
         if getattr(sys, "frozen", False):
@@ -199,7 +252,13 @@ class FishTrainerGUI:
         else:
             self.label_proc = proc
 
-        self.log(f"启动 {process_kind}: {' '.join(cmd)}")
+        self.log(
+            self.tr(
+                "trainer.process.started",
+                kind=self.tr(f"trainer.task.{process_kind}", default=process_kind),
+                command=" ".join(cmd),
+            )
+        )
         threading.Thread(
             target=self._stream_process_output,
             args=(proc, process_kind),
@@ -212,7 +271,15 @@ class FishTrainerGUI:
         for line in proc.stdout:
             clean = line.rstrip()
             if clean:
-                self.root.after(0, self.log, f"{process_kind}> {clean}")
+                self.root.after(
+                    0,
+                    self.log,
+                    self.tr(
+                        "trainer.process.line",
+                        kind=self.tr(f"trainer.task.{process_kind}", default=process_kind),
+                        line=clean,
+                    ),
+                )
         code = proc.wait()
         self.root.after(0, self._on_process_done, process_kind, code)
 
@@ -221,19 +288,25 @@ class FishTrainerGUI:
             self.collect_proc = None
         else:
             self.label_proc = None
-        self.log(f"{process_kind} 已结束，退出码: {code}")
+        self.log(
+            self.tr(
+                "trainer.process.done",
+                kind=self.tr(f"trainer.task.{process_kind}", default=process_kind),
+                code=code,
+            )
+        )
         self.refresh_stats()
 
     def start_collect(self):
         if self.collect_proc and self.collect_proc.poll() is None:
-            messagebox.showinfo("提示", "采集已经在运行中")
+            messagebox.showinfo(self.tr("trainer.msg.info"), self.tr("trainer.msg.collectRunning"))
             return
 
         try:
             fps = float(self.fps_var.get().strip())
             max_count = int(self.max_var.get().strip())
         except ValueError:
-            messagebox.showerror("参数错误", "请填写正确的采集 FPS 和最大张数")
+            messagebox.showerror(self.tr("trainer.msg.paramError"), self.tr("trainer.msg.invalidCollectArgs"))
             return
 
         cmd = self.build_runner_command(
@@ -248,20 +321,20 @@ class FishTrainerGUI:
 
     def stop_collect(self):
         if not self.collect_proc or self.collect_proc.poll() is not None:
-            messagebox.showinfo("提示", "当前没有运行中的采集任务")
+            messagebox.showinfo(self.tr("trainer.msg.info"), self.tr("trainer.msg.collectIdle"))
             return
         self.collect_proc.terminate()
-        self.log("已请求停止采集")
+        self.log(self.tr("trainer.msg.stopCollectRequested"))
 
     def start_label(self, relabel=False):
         if self.label_proc and self.label_proc.poll() is None:
-            messagebox.showinfo("提示", "标注工具已经在运行中")
+            messagebox.showinfo(self.tr("trainer.msg.info"), self.tr("trainer.msg.labelRunning"))
             return
 
         try:
             split = float(self.split_var.get().strip())
         except ValueError:
-            messagebox.showerror("参数错误", "请填写正确的验证集比例")
+            messagebox.showerror(self.tr("trainer.msg.paramError"), self.tr("trainer.msg.invalidSplit"))
             return
 
         cmd = self.build_runner_command(
@@ -277,11 +350,11 @@ class FishTrainerGUI:
         self.refresh_stats()
         default_name = build_export_name()
         zip_path = filedialog.asksaveasfilename(
-            title="导出已标注图片和标签",
+            title=self.tr("trainer.msg.exportDialogTitle"),
             defaultextension=".zip",
             initialdir=APP_ROOT,
             initialfile=default_name,
-            filetypes=[("ZIP 文件", "*.zip")],
+            filetypes=[(self.tr("trainer.msg.zipFileType"), "*.zip")],
         )
         if not zip_path:
             return
@@ -289,14 +362,17 @@ class FishTrainerGUI:
         try:
             count = export_labeled_dataset(zip_path)
         except ValueError as exc:
-            messagebox.showinfo("没有可导出的数据", str(exc))
+            messagebox.showinfo(self.tr("trainer.msg.noExportData"), str(exc))
             return
         except Exception as exc:
-            messagebox.showerror("导出失败", str(exc))
+            messagebox.showerror(self.tr("trainer.msg.exportFailed"), str(exc))
             return
 
-        self.log(f"已导出 {count} 对图片+标签 -> {zip_path}")
-        messagebox.showinfo("导出完成", f"已导出 {count} 对图片和标签:\n{zip_path}")
+        self.log(self.tr("trainer.msg.exported", count=count, path=zip_path))
+        messagebox.showinfo(
+            self.tr("trainer.msg.exportDone"),
+            self.tr("trainer.msg.exportDoneDetail", count=count, path=zip_path),
+        )
 
     def open_dir(self, path):
         os.makedirs(path, exist_ok=True)
@@ -305,12 +381,15 @@ class FishTrainerGUI:
     def on_close(self):
         running = []
         if self.collect_proc and self.collect_proc.poll() is None:
-            running.append("采集")
+            running.append(self.tr("trainer.task.collect"))
         if self.label_proc and self.label_proc.poll() is None:
-            running.append("标注")
+            running.append(self.tr("trainer.task.label"))
 
         if running:
-            if not messagebox.askyesno("确认退出", f"当前仍有任务在运行: {', '.join(running)}\n确定直接退出吗？"):
+            if not messagebox.askyesno(
+                self.tr("trainer.msg.exitConfirm"),
+                self.tr("trainer.msg.exitRunning", tasks=", ".join(running)),
+            ):
                 return
             for proc in (self.collect_proc, self.label_proc):
                 if proc and proc.poll() is None:

@@ -29,6 +29,7 @@ from core.minigame_rescue import RescueService
 from core.minigame_runner import MinigameRunner
 from core.minigame_runtime import DetectionContext, MinigameRuntime, PipelineContext
 from core.pd_controller import PDController
+from utils.i18n import fish_name, t
 from utils.logger import log
 
 _yolo_detector = None
@@ -49,19 +50,19 @@ def _get_yolo_detector(force_reload=False):
 class FishingBot:
     """VRChat 自动钓鱼机器人"""
 
-    # 鱼模板 → 中文名 + 调试框颜色 (BGR)
-    FISH_DISPLAY = {
-        "fish_generic": ("通用鱼", (180, 180, 180)),
-        "fish_black":   ("黑鱼",  (80, 80, 80)),
-        "fish_white":   ("白鱼",  (255, 255, 255)),
-        "fish_copper":  ("铜鱼",  (50, 127, 180)),
-        "fish_green":   ("绿鱼",  (0, 255, 0)),
-        "fish_blue":    ("蓝鱼",  (255, 150, 0)),
-        "fish_purple":  ("紫鱼",  (200, 50, 200)),
-        "fish_golden":  ("金鱼",  (0, 215, 255)),
-        "fish_pink":    ("粉鱼",  (180, 105, 255)),
-        "fish_red":     ("红鱼",  (0, 0, 255)),
-        "fish_rainbow": ("彩鱼",  (0, 255, 255)),
+    # 鱼模板 → 调试框颜色 (BGR)
+    FISH_COLORS = {
+        "fish_generic": (180, 180, 180),
+        "fish_black":   (80, 80, 80),
+        "fish_white":   (255, 255, 255),
+        "fish_copper":  (50, 127, 180),
+        "fish_green":   (0, 255, 0),
+        "fish_blue":    (255, 150, 0),
+        "fish_purple":  (200, 50, 200),
+        "fish_golden":  (0, 215, 255),
+        "fish_pink":    (180, 105, 255),
+        "fish_red":     (0, 0, 255),
+        "fish_rainbow": (0, 255, 255),
     }
 
     def __init__(self):
@@ -81,7 +82,7 @@ class FishingBot:
         self.running    = False
         self.debug_mode = False
         self.fish_count = 0
-        self.state      = "就绪"
+        self.state      = "bot.state.ready"
 
         # ── PD 控制器 ──
         self.pd = PDController()
@@ -221,19 +222,19 @@ class FishingBot:
         return flag
 
     def _cast_rod(self):
-        self.state = "抛竿中"
+        self.state = "bot.state.casting"
         if config.IL_RECORD:
-            log.info("[🎣 抛竿] 录制模式 — 请手动抛竿 (点击鼠标)")
+            log.info_t("bot.log.castRecord")
         else:
             self.input.click()
             if self._wait_with_minigame_preempt(0.15, "🎣 抛竿后摇杆等待"):
                 return True
             mode = getattr(config, "ANTI_STUCK_MODE", "jump")
             if mode == "jump":
-                log.info("[🎣 抛竿] 抛竿 → 跳跃防卡杆")
+                log.info_t("bot.log.castJump")
                 self.input.jump_toggle()
             else:
-                log.info("[🎣 抛竿] 抛竿 → 摇头防卡杆")
+                log.info_t("bot.log.castShake")
                 self.input.shake_head()
         # ★ 从抛竿开始就显示 debug 窗口
         try:
@@ -281,7 +282,7 @@ class FishingBot:
 
     def _wait_until_ui_gone(self, timeout=3.0, clear_frames=2):
         """收杆后等待上一轮小游戏 UI 消失，避免串到下一轮。"""
-        self.state = "等待UI消失"
+        self.state = "bot.state.waitUiGone"
         # 清掉上一阶段遗留的抢占标记，避免收尾阶段把本局残留 UI 串成下一局。
         self._force_minigame = False
         t0 = time.time()
@@ -379,7 +380,7 @@ class FishingBot:
         return False
 
     def _hook_fish(self):
-        self.state = "提竿"
+        self.state = "bot.state.hooking"
         if config.IL_RECORD:
             log.info("[🪝 提竿] 录制模式 — 请手动提竿 (点击鼠标)")
         else:
@@ -546,7 +547,7 @@ class FishingBot:
                             ui_found = False
                     if ui_found:
                         entered_early = True
-                        self.state = "小游戏进行中"
+                        self.state = "bot.state.minigame"
                         log.warning(
                             f"[⚠ 提前进入] 设定提竿时间前 {wait_elapsed:.1f}s "
                             f"已检测到鱼/小游戏UI，判定已提前拉杆，"
@@ -570,7 +571,7 @@ class FishingBot:
 
     def _announce_minigame_start(self, entered_early: bool, use_yolo: bool):
         """统一输出小游戏开始阶段的日志，并准备控制模式。"""
-        self.state = "小游戏进行中"
+        self.state = "bot.state.minigame"
         if entered_early:
             log.info("[🐟 钓鱼] 检测到已提前进入小游戏，开始接管控制")
         else:
@@ -774,6 +775,91 @@ class FishingBot:
             pipe.shared_params["locked_bar_scales"] = ctx.locked_bar_scales
             pipe.shared_params["frame"] = runtime.frame
 
+    def _get_fish_display(self):
+        return {
+            key: (fish_name(key), color)
+            for key, color in self.FISH_COLORS.items()
+        }
+
+    def _reset_fish_name_state(self, runtime: MinigameRuntime):
+        """清理鱼类别稳定器与白名单确认状态。"""
+        runtime.fish_name_pending = ""
+        runtime.fish_name_pending_frames = 0
+        runtime.blocked_fish_pending = ""
+        runtime.blocked_fish_pending_frames = 0
+
+    def _stabilize_fish_name(self, detected_name: str,
+                             runtime: MinigameRuntime) -> str:
+        """
+        对 YOLO 鱼类别做短时稳定，避免同一条鱼在相邻帧里频繁切色。
+        返回当前应当生效的稳定类别；空字符串表示暂不接受切换。
+        """
+        detected_name = detected_name or ""
+        if not detected_name:
+            runtime.fish_name_pending = ""
+            runtime.fish_name_pending_frames = 0
+            return self._current_fish_name or ""
+
+        current_name = self._current_fish_name or ""
+        if detected_name == current_name:
+            runtime.fish_name_pending = ""
+            runtime.fish_name_pending_frames = 0
+            return detected_name
+
+        if runtime.fish_name_pending != detected_name:
+            runtime.fish_name_pending = detected_name
+            runtime.fish_name_pending_frames = 1
+        else:
+            runtime.fish_name_pending_frames += 1
+
+        stable_frames = max(1, getattr(config, "YOLO_FISH_STABLE_FRAMES", 3))
+        if runtime.fish_name_pending_frames < stable_frames:
+            return current_name
+
+        prev_name = current_name
+        runtime.fish_name_pending = ""
+        runtime.fish_name_pending_frames = 0
+        if prev_name and prev_name != detected_name:
+            display_map = self._get_fish_display()
+            prev_cn = display_map.get(prev_name, (prev_name,))[0]
+            new_cn = display_map.get(detected_name, (detected_name,))[0]
+            log.info_t(
+                "bot.log.fishSwitch",
+                old=prev_cn,
+                new=new_cn,
+                frames=stable_frames,
+            )
+        return detected_name
+
+    def _should_skip_fish_by_whitelist(self, fish_name: str,
+                                       runtime: MinigameRuntime) -> bool:
+        """非白名单鱼需要连续命中多帧才真正触发放弃。"""
+        if not fish_name:
+            runtime.blocked_fish_pending = ""
+            runtime.blocked_fish_pending_frames = 0
+            return False
+
+        if config.FISH_WHITELIST.get(fish_name, True):
+            runtime.blocked_fish_pending = ""
+            runtime.blocked_fish_pending_frames = 0
+            return False
+
+        if runtime.blocked_fish_pending != fish_name:
+            runtime.blocked_fish_pending = fish_name
+            runtime.blocked_fish_pending_frames = 1
+        else:
+            runtime.blocked_fish_pending_frames += 1
+
+        confirm_frames = max(
+            1, getattr(config, "YOLO_WHITELIST_CONFIRM_FRAMES", 6)
+        )
+        if runtime.blocked_fish_pending_frames < confirm_frames:
+            return False
+
+        runtime.blocked_fish_pending = ""
+        runtime.blocked_fish_pending_frames = 0
+        return True
+
     def _postprocess_minigame_detection(self, screen, screen_raw,
                                         fish, bar, matched_key, bar_scale,
                                         yolo_progress, prog_hook,
@@ -795,6 +881,9 @@ class FishingBot:
                         runtime.fish_id_saved = True
                     matched_key = color_key
                     fish_detect_name = color_key
+                fish_detect_name = self._stabilize_fish_name(
+                    fish_detect_name, runtime
+                )
 
             if config.YOLO_COLLECT and runtime.frame % 10 == 0:
                 collect_dir = os.path.join(
@@ -830,9 +919,16 @@ class FishingBot:
             self._current_fish_name = fish_detect_name
         if not runtime.skip_fish and fish_detect_name:
             wl_key = fish_detect_name
-            if not config.FISH_WHITELIST.get(wl_key, True):
-                fname_cn = self.FISH_DISPLAY.get(wl_key, (wl_key,))[0]
-                log.info(f"[白名单] {fname_cn} 不在白名单中, 放弃本次钓鱼")
+            if self._should_skip_fish_by_whitelist(wl_key, runtime):
+                fname_cn = self._get_fish_display().get(wl_key, (wl_key,))[0]
+                confirm_frames = max(
+                    1, getattr(config, "YOLO_WHITELIST_CONFIRM_FRAMES", 6)
+                )
+                log.info_t(
+                    "bot.log.whitelistSkip",
+                    fish=fname_cn,
+                    frames=confirm_frames,
+                )
                 runtime.skip_fish = True
 
         if not ctx.use_yolo and bar is not None and not ctx.locked_bar_scales:
@@ -917,6 +1013,7 @@ class FishingBot:
                     and abs(raw_fcx - self._bar_locked_cx) > ctx.fish_x_half):
                 fish = None
                 self._current_fish_name = ""
+                self._reset_fish_name_state(runtime)
             if fish is not None and self._bar_locked_cx is not None:
                 fish = (
                     self._bar_locked_cx - fish[2] // 2,
@@ -1195,7 +1292,7 @@ class FishingBot:
             need_rotation=self._need_rotation,
             track_angle=self._track_angle,
             current_fish_name=self._current_fish_name,
-            fish_display=self.FISH_DISPLAY,
+            fish_display=self._get_fish_display(),
             bar_velocity=self.pd.bar_velocity,
         )
 
@@ -1427,15 +1524,15 @@ class FishingBot:
 
     def run(self):
         """主钓鱼循环 — 由 GUI 在后台线程启动"""
-        log.info("钓鱼线程已启动")
+        log.info_t("bot.log.threadStarted")
 
         while self.running:
             try:
                 force_minigame = self._consume_minigame_preempt()
                 if config.IL_RECORD:
                     # ★ 录制模式: 用户手动操作, 程序等待小游戏UI出现
-                    self.state = "录制: 等待小游戏"
-                    log.info("[IL] 请手动抛竿→等待→提竿, 程序在等待小游戏出现...")
+                    self.state = "bot.state.recordWaitMinigame"
+                    log.info_t("bot.log.recordWait")
                     if not self._wait_for_minigame_ui():
                         break
                 elif not force_minigame:
@@ -1449,28 +1546,28 @@ class FishingBot:
                 result = self._fishing_minigame(start_in_minigame=force_minigame)
 
                 if result is None:
-                    self.state = "等待重抛"
+                    self.state = "bot.state.waitRecast"
                     self._wait_with_minigame_preempt(
                         config.POST_CATCH_DELAY, "⏳ 等待重抛")
-                    log.info("─" * 40)
+                    log.info_t("bot.log.separator")
                     continue
 
                 self.fish_count += 1
-                tag = "成功 ✅" if result else "完成"
-                log.info(f"[🎣 结果] 第 {self.fish_count} 次钓鱼 — {tag}")
-                log.info("─" * 40)
+                tag = t("bot.result.success") if result else t("bot.result.complete")
+                log.info_t("bot.log.result", count=self.fish_count, tag=tag)
+                log.info_t("bot.log.separator")
 
-                self.state = "等待下一轮"
+                self.state = "bot.state.waitNextRound"
                 self._wait_with_minigame_preempt(
                     config.POST_CATCH_DELAY, "⏳ 等待下一轮")
             except Exception as e:
-                log.error(f"运行异常: {e}")
+                log.error_t("bot.log.runException", error=e)
                 if not config.IL_RECORD:
                     self.input.safe_release()
                 self._wait_with_minigame_preempt(2.0, "⚠ 异常恢复等待")
 
         if not config.IL_RECORD:
             self.input.safe_release()
-        self.state = "已停止"
-        log.info("钓鱼线程已停止")
+        self.state = "bot.state.stopped"
+        log.info_t("bot.log.threadStopped")
         self.shutdown_debug_overlay()

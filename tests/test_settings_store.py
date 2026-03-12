@@ -6,6 +6,7 @@ import json
 
 import config
 from gui.settings_store import AppSettingsStore
+from utils.i18n import set_language
 
 
 class FakeVar:
@@ -32,8 +33,11 @@ class SettingsStoreTests(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.settings_file = os.path.join(self.tmpdir.name, "settings.json")
         self.old_settings_file = config.SETTINGS_FILE
+        self.old_language = config.LANGUAGE
         config.SETTINGS_FILE = self.settings_file
+        config.LANGUAGE = "zh-CN"
         self.log_messages = []
+        self.rebuild_calls = []
         self.app = SimpleNamespace(
             _param_vars={
                 "HOLD_MIN_S": (FakeVar("30"), "ms"),
@@ -42,16 +46,21 @@ class SettingsStoreTests(unittest.TestCase):
             _param_entries={"SUCCESS_PROGRESS": FakeEntry()},
             PARAM_DEFAULTS={"HOLD_MIN_S": 0.025, "SUCCESS_PROGRESS": 0.55},
             SETTINGS_DEFAULTS={"SKIP_SUCCESS_CHECK": False, "SYNC_PD_MODE": True},
-            PERSISTED_CONFIG_ATTRS=("SKIP_SUCCESS_CHECK", "SYNC_PD_MODE"),
+            PERSISTED_CONFIG_ATTRS=("LANGUAGE", "SKIP_SUCCESS_CHECK", "SYNC_PD_MODE"),
             var_grouped_params=FakeVar(True),
             var_preset_name=FakeVar(""),
+            var_language=FakeVar("简体中文"),
             var_skip_success=FakeVar(False),
             var_sync_pd_mode=FakeVar(True),
             var_anti_mode=FakeVar("jump"),
             var_shake_time=FakeVar("0.020"),
             _log_msg=self.log_messages.append,
+            _log_t=lambda key, **kwargs: self.log_messages.append((key, kwargs)),
             _update_success_threshold_state=lambda: None,
             _render_params_panel=lambda: None,
+            _update_window_title=lambda: None,
+            _refresh_language_choices=lambda: None,
+            _rebuild_ui_for_language=lambda: self.rebuild_calls.append(True),
         )
         self.store = AppSettingsStore(self.app)
         self.old_hold_min = config.HOLD_MIN_S
@@ -59,6 +68,8 @@ class SettingsStoreTests(unittest.TestCase):
 
     def tearDown(self):
         config.SETTINGS_FILE = self.old_settings_file
+        config.LANGUAGE = self.old_language
+        set_language(self.old_language)
         config.HOLD_MIN_S = self.old_hold_min
         config.SUCCESS_PROGRESS = self.old_success_progress
         self.tmpdir.cleanup()
@@ -108,6 +119,17 @@ class SettingsStoreTests(unittest.TestCase):
         deleted = self.store.delete_preset("预设A")
         self.assertTrue(deleted)
         self.assertNotIn("预设A", self.store.get_preset_names())
+
+    def test_apply_loaded_setting_updates_language_and_rebuilds(self):
+        handled = self.store.apply_loaded_setting("LANGUAGE", "en-US")
+        self.assertTrue(handled)
+        self.assertEqual(config.LANGUAGE, "en-US")
+        self.assertEqual(len(self.rebuild_calls), 1)
+
+    def test_collect_settings_includes_language(self):
+        config.LANGUAGE = "en-US"
+        data = self.store.collect_settings_data()
+        self.assertEqual(data["LANGUAGE"], "en-US")
 
 
 if __name__ == "__main__":
