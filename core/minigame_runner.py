@@ -27,7 +27,7 @@ class MinigameRunner:
                 bot.yolo = _get_yolo_detector()
             except Exception as e:
                 from utils.logger import log
-                log.warning(f"[YOLO] 加载失败: {e}，回退到模板匹配")
+                log.warning_t("runner.log.yoloLoadFallback", error=e)
 
         use_yolo = config.USE_YOLO and bot.yolo is not None
         skip_success_check = getattr(config, "SKIP_SUCCESS_CHECK", False)
@@ -57,9 +57,10 @@ class MinigameRunner:
                 elapsed = time.time() - runtime.minigame_start
                 if elapsed > config.MINIGAME_TIMEOUT:
                     from utils.logger import log
-                    log.info(
-                        f"[⏱ 超时] 小游戏已进行 {elapsed:.0f}s，"
-                        f"超过 {config.MINIGAME_TIMEOUT:.0f}s 限制，强制结束"
+                    log.info_t(
+                        "runner.log.timeoutForceEnd",
+                        elapsed=elapsed,
+                        limit=config.MINIGAME_TIMEOUT,
                     )
                     break
 
@@ -69,7 +70,7 @@ class MinigameRunner:
                 if runtime.no_detect > 3 and not use_yolo:
                     if pipe_bar is not None:
                         from utils.logger import log
-                        log.info(f"[✓ 恢复] 丢失{runtime.no_detect}帧后重新检测到白条")
+                        log.info_t("runner.log.barRecovered", count=runtime.no_detect)
                         runtime.no_detect = 0
                     else:
                         runtime.no_detect += 1

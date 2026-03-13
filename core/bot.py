@@ -76,7 +76,7 @@ class FishingBot:
             try:
                 self.yolo = _get_yolo_detector()
             except Exception as e:
-                log.warning(f"[YOLO] 启动加载失败: {e}")
+                log.warning_t("bot.log.yoloStartupFailed", error=e)
 
         # ── 共享状态（GUI 读取）──
         self.running    = False
@@ -213,7 +213,7 @@ class FishingBot:
         """设置全局小游戏抢占标记。"""
         if not self._force_minigame:
             self._force_minigame = True
-            log.warning(f"[⚠ 抢占] {reason}，立即切入 PD 控制")
+            log.warning_t("bot.log.preemptSwitch", reason=reason)
 
     def _consume_minigame_preempt(self) -> bool:
         """读取并清空小游戏抢占标记。"""
@@ -382,9 +382,9 @@ class FishingBot:
     def _hook_fish(self):
         self.state = "bot.state.hooking"
         if config.IL_RECORD:
-            log.info("[🪝 提竿] 录制模式 — 请手动提竿 (点击鼠标)")
+            log.info_t("bot.log.manualHookRecord")
         else:
-            log.info("[🪝 提竿] 点击鼠标提竿!")
+            log.info_t("bot.log.manualHookClick")
             if self._wait_with_minigame_preempt(config.HOOK_PRE_DELAY, "🪝 提竿前等待"):
                 return True
             self.input.click()
@@ -425,11 +425,16 @@ class FishingBot:
                 if abs(bar_cx - track_cx) < 150:
                     consecutive += 1
                     if not logged and consecutive >= 1:
-                        log.info(f"[IL] 检测到UI元素 ({consecutive}/{required})...")
+                        log.info_t(
+                            "bot.log.ilUiDetected",
+                            current=consecutive,
+                            required=required,
+                        )
                         logged = True
                     if consecutive >= required:
-                        log.info(
-                            f"[IL] 小游戏确认! (连续{required}帧检测到白条+轨道)"
+                        log.info_t(
+                            "bot.log.ilMinigameConfirmed",
+                            required=required,
                         )
                         return True
                 else:
@@ -513,12 +518,12 @@ class FishingBot:
             return self.running, entered_early
 
         wait_s = config.BITE_FORCE_HOOK
-        log.info(f"[⏳ 等待] 等待 {wait_s:.0f}s 后提竿, 同时运行检测...")
+        log.info_t("bot.log.waitHook", seconds=wait_s)
         wait_t0 = time.time()
         while self.running:
             wait_elapsed = time.time() - wait_t0
             if wait_elapsed >= wait_s:
-                log.info(f"[🪝 提竿] 等待 {wait_elapsed:.1f}s 完毕, 自动提竿")
+                log.info_t("bot.log.autoHook", elapsed=wait_elapsed)
                 break
             try:
                 wait_screen = self._grab()
@@ -548,10 +553,9 @@ class FishingBot:
                     if ui_found:
                         entered_early = True
                         self.state = "bot.state.minigame"
-                        log.warning(
-                            f"[⚠ 提前进入] 设定提竿时间前 {wait_elapsed:.1f}s "
-                            f"已检测到鱼/小游戏UI，判定已提前拉杆，"
-                            f"直接切入小游戏控制阶段"
+                        log.warning_t(
+                            "bot.log.earlyMinigame",
+                            elapsed=wait_elapsed,
                         )
                         break
             except Exception:
@@ -573,25 +577,25 @@ class FishingBot:
         """统一输出小游戏开始阶段的日志，并准备控制模式。"""
         self.state = "bot.state.minigame"
         if entered_early:
-            log.info("[🐟 钓鱼] 检测到已提前进入小游戏，开始接管控制")
+            log.info_t("bot.log.enteredEarly")
         else:
-            log.info("[🐟 钓鱼] 小游戏开始")
+            log.info_t("bot.log.minigameStarted")
 
         if config.IL_RECORD:
             self.il.start_recording()
-            log.info("[IL] 录制模式: 请手动操作鼠标控制白条!")
+            log.info_t("bot.log.ilManualControl")
         elif config.IL_USE_MODEL:
             if self.il.policy is None:
                 self.il.load_policy()
             if self.il.policy is not None:
-                log.info("[IL] ★ 本局使用行为克隆模型控制 ★")
+                log.info_t("bot.log.ilUseModel")
             else:
-                log.warning("[IL] 模型加载失败, 回退到 PD 控制器")
+                log.warning_t("bot.log.ilFallbackPd")
         else:
-            log.info("[PD] 本局使用 PD 控制器")
+            log.info_t("bot.log.usePd")
 
         if use_yolo:
-            log.info("[YOLO] 使用 YOLO 目标检测")
+            log.info_t("bot.log.useYolo")
 
         self.detector.debug_report = True
         self.input.move_to_game_center()
@@ -619,13 +623,14 @@ class FishingBot:
         screen_orig = self._grab()
         self.screen.save_debug(screen_orig, "minigame_start")
         h_orig, w_orig = screen_orig.shape[:2]
-        log.info(f"  截图尺寸: {w_orig}×{h_orig}")
-        self._show_debug_overlay(screen_orig, status_text="🐟 小游戏初始化...")
+        log.info_t("bot.log.captureSize", width=w_orig, height=h_orig)
+        self._show_debug_overlay(screen_orig, status_text=t("bot.log.minigameInit"))
 
         if self._need_rotation:
-            log.info(
-                f"  ► 轨道倾斜 {self._track_angle:.1f}°, "
-                f"启用旋转补偿 (旋转 {-self._track_angle:.1f}°)"
+            log.info_t(
+                "bot.log.rotationComp",
+                angle=self._track_angle,
+                rotate=-self._track_angle,
             )
             screen = self._rotate_for_detection(screen_orig)
         else:
@@ -637,33 +642,46 @@ class FishingBot:
             ctx.bar_search_region = None
             ctx.regions_locked = True
             if config.DETECT_ROI:
-                log.info(
-                    f"  [YOLO] 使用手动 ROI: "
-                    f"X={config.DETECT_ROI[0]} Y={config.DETECT_ROI[1]} "
-                    f"{config.DETECT_ROI[2]}x{config.DETECT_ROI[3]}"
+                log.info_t(
+                    "bot.log.useManualRoi",
+                    x=config.DETECT_ROI[0],
+                    y=config.DETECT_ROI[1],
+                    w=config.DETECT_ROI[2],
+                    h=config.DETECT_ROI[3],
                 )
             elif self._auto_roi:
-                log.info(
-                    f"  [YOLO] 使用自动 ROI: "
-                    f"X={self._auto_roi[0]} Y={self._auto_roi[1]} "
-                    f"{self._auto_roi[2]}x{self._auto_roi[3]}"
+                log.info_t(
+                    "bot.log.useAutoRoi",
+                    x=self._auto_roi[0],
+                    y=self._auto_roi[1],
+                    w=self._auto_roi[2],
+                    h=self._auto_roi[3],
                 )
             else:
-                log.info("  [YOLO] 全屏检测")
+                log.info_t("bot.log.useFullScreenDetect")
         else:
             ctx.search_region, track_cx, ctx.bar_search_region = self._init_search_region(screen)
             ctx.regions_locked = False
             if track_cx is not None:
                 self._bar_locked_cx = track_cx
-                log.info(f"  ★ 轨道X轴预锁定: X={track_cx}")
+                log.info_t("bot.log.preLockTrackX", x=track_cx)
             if ctx.search_region:
                 srx, sry, srw, srh = ctx.search_region
-                log.info(f"  初始鱼搜索: X={srx}~{srx+srw} Y={sry}~{sry+srh}")
+                log.info_t(
+                    "bot.log.initialFishSearch",
+                    x1=srx,
+                    x2=srx + srw,
+                    y1=sry,
+                    y2=sry + srh,
+                )
             if ctx.bar_search_region:
                 bsx, bsy, bsw, bsh = ctx.bar_search_region
-                log.info(
-                    f"  初始白条搜索: X={bsx}~{bsx+bsw} "
-                    f"Y={bsy}~{bsy+bsh} (下半屏)"
+                log.info_t(
+                    "bot.log.initialBarSearch",
+                    x1=bsx,
+                    x2=bsx + bsw,
+                    y1=bsy,
+                    y2=bsy + bsh,
                 )
 
         return screen_orig, screen
@@ -677,7 +695,7 @@ class FishingBot:
         )
         pipe = PipelineContext(sync_pd_mode=sync_pd_mode)
         if pipe.sync_pd_mode:
-            log.info("[模式] 小游戏使用旧版模式（使用旧版参数）")
+            log.info_t("bot.log.legacyMode")
             return pipe
 
         pipe.frame_q = queue.Queue(maxsize=1)
@@ -709,7 +727,7 @@ class FishingBot:
         )
         pipe.capture_thread.start()
         pipe.detect_thread.start()
-        log.info("[流水线] 截图线程 & 检测线程已启动 (最新结果模式, 队列=1)")
+        log.info_t("bot.log.pipelineStarted")
         return pipe
 
     def _stop_pipeline(self, pipe: PipelineContext):
@@ -719,7 +737,7 @@ class FishingBot:
         pipe.stop_evt.set()
         pipe.capture_thread.join(timeout=1.0)
         pipe.detect_thread.join(timeout=1.0)
-        log.info("[流水线] 截图线程 & 检测线程已停止")
+        log.info_t("bot.log.pipelineStopped")
 
     def _get_next_detection_result(self, runtime: MinigameRuntime,
                                    ctx: DetectionContext,
@@ -901,7 +919,7 @@ class FishingBot:
                         and runtime.fish_lost % 20 == 0):
                     ctx.locked_fish_key = None
                     ctx.locked_fish_scales = None
-                    log.info("  ★ 解除鱼模板锁定, 重新搜索")
+                    log.info_t("bot.log.unlockFishTemplate")
             elif fish is not None:
                 fish_detect_name = matched_key or "?"
                 if matched_key and matched_key != "fish_white":
@@ -910,9 +928,10 @@ class FishingBot:
                     ctx.locked_fish_scales = [
                         round(scale * 0.85, 2), scale, round(scale * 1.15, 2)
                     ]
-                    log.info(
-                        f"  ★ 锁定鱼模板: {ctx.locked_fish_key} @ scales="
-                        f"{[f'{x:.2f}' for x in ctx.locked_fish_scales]}"
+                    log.info_t(
+                        "bot.log.lockFishTemplate",
+                        name=ctx.locked_fish_key,
+                        scales=[f"{x:.2f}" for x in ctx.locked_fish_scales],
                     )
 
         if fish is not None:
@@ -937,16 +956,16 @@ class FishingBot:
                 bar_scale,
                 round(bar_scale * 1.15, 2),
             ]
-            log.info(
-                f"  ★ 锁定白条 @ scales="
-                f"{[f'{x:.2f}' for x in ctx.locked_bar_scales]}"
+            log.info_t(
+                "bot.log.lockBarTemplate",
+                scales=[f"{x:.2f}" for x in ctx.locked_bar_scales],
             )
 
         if bar is not None:
             raw_bcx = bar[0] + bar[2] // 2
             if self._bar_locked_cx is None:
                 self._bar_locked_cx = raw_bcx
-                log.info(f"  ★ 轨道X轴锁定(白条): X={raw_bcx}")
+                log.info_t("bot.log.lockTrackXFromBar", x=raw_bcx)
             elif abs(raw_bcx - self._bar_locked_cx) > ctx.bar_x_half:
                 bar = None
 
@@ -1166,7 +1185,7 @@ class FishingBot:
                 det_names.append("条")
             if yolo_progress is not None:
                 det_names.append("进度条")
-            log.info(f"[🐟 开始] 检测到{'+'.join(det_names)}, 小游戏确认! PD控制启动")
+            log.info_t("bot.log.minigameConfirmed", names="+".join(det_names))
             if not config.IL_RECORD:
                 press_t = getattr(config, "INITIAL_PRESS_TIME", 0.2)
                 self.input.mouse_down()
@@ -1175,10 +1194,7 @@ class FishingBot:
             return "ok"
 
         if time.time() - runtime.hook_time > ctx.hook_detect_timeout:
-            log.warning(
-                f"[⚠ 超时] 提竿后 {ctx.hook_detect_timeout}s 未检测到鱼,"
-                f" 判定未进入小游戏, 返回主循环重新抛竿"
-            )
+            log.warning_t("bot.log.hookTimeout", seconds=ctx.hook_detect_timeout)
             runtime.hook_timeout_retry = True
             return "break"
 
@@ -1358,20 +1374,23 @@ class FishingBot:
                 )
         elif bar_cx is not None:
             chosen_cx = bar_cx
-            log.info(f"  ► 仅检测到白条 @ X={bar_cx} conf={bar[4]:.2f}")
+            log.info_t("bot.log.onlyBarDetected", x=bar_cx, conf=bar[4])
         elif track_cx is not None:
             chosen_cx = track_cx
-            log.info(f"  ► 仅检测到轨道 @ X={track_cx} conf={track[4]:.2f}")
+            log.info_t("bot.log.onlyTrackDetected", x=track_cx, conf=track[4])
 
         # ── 有 ROI → 直接用 ROI 作为搜索区域 ──
         if roi:
             roi_t = tuple(roi)
             if chosen_cx is None:
                 chosen_cx = roi[0] + roi[2] // 2
-                log.info(f"  ► ROI内未找到轨道/白条, 使用ROI中心 X={chosen_cx}")
-            log.info(
-                f"  ★ 使用框选区域: X={roi[0]} Y={roi[1]} "
-                f"{roi[2]}x{roi[3]}"
+                log.info_t("bot.log.useRoiCenter", x=chosen_cx)
+            log.info_t(
+                "bot.log.useSelectedRoi",
+                x=roi[0],
+                y=roi[1],
+                w=roi[2],
+                h=roi[3],
             )
             return roi_t, chosen_cx, roi_t
 
@@ -1390,7 +1409,7 @@ class FishingBot:
 
         sw = int(w * 0.6)
         y_start = h // 2
-        log.info("  ► 未找到轨道和白条, 使用左侧下半区域")
+        log.info_t("bot.log.useFallbackRegion")
         fallback = (0, y_start, sw, h - y_start)
         return fallback, None, fallback
 

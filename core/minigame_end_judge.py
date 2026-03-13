@@ -34,7 +34,7 @@ class MinigameEndJudge:
             if runtime.no_detect > 5 and not config.IL_RECORD:
                 self.input.mouse_up()
             if runtime.no_detect == 10:
-                log.warning(f"[⚠ 丢失] 连续{runtime.no_detect}帧鱼+条均未检测到")
+                log.warning_t("endJudge.log.noDetectWarning", count=runtime.no_detect)
                 self.screen.save_debug(screen, "minigame_lost")
             if runtime.no_detect >= 10 and rescue(
                     "连续丢失中", attempts=4, interval_s=0.02):

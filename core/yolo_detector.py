@@ -90,7 +90,7 @@ class YoloDetector:
             except Exception as e:
                 if dev_pref == "gpu":
                     raise RuntimeError(f"[YOLO] 强制 GPU 模式但初始化失败: {e}")
-                log.warning(f"[YOLO] GPU 不可用 ({e}), 回退 CPU")
+                log.warning_t("yolo.log.gpuFallback", error=e)
 
         self._device = "cpu"
         pass  # 静默加载 CPU
@@ -98,7 +98,7 @@ class YoloDetector:
             warmup_img, conf=0.5, device="cpu",
             verbose=False, imgsz=640,
         )
-        log.info(f"[YOLO] ✓ CPU 模式就绪: {self.model.names}")
+        log.info_t("yolo.log.cpuReady", names=self.model.names)
 
     def detect(self, screen, roi=None):
         """

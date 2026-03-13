@@ -68,7 +68,7 @@ class ReelExitHandler:
             timeout=max(config.POST_CATCH_DELAY + 1.0, 3.0)
         )
         if not ui_gone:
-            log.warning("[⚠ UI] 收杆后上一轮小游戏UI未及时消失，已继续流程")
+            log.warning_t("reel.log.uiNotGone")
         return success
 
     def finalize(self, hook_timeout_retry: bool,
@@ -84,7 +84,7 @@ class ReelExitHandler:
             self._wait_until_ui_gone(
                 timeout=max(config.POST_CATCH_DELAY + 1.0, 3.0)
             )
-            log.info("[🎣 收杆] 点击收杆后返回主循环重新抛竿")
+            log.info_t("reel.log.retryReturnLoop")
             return None
 
         success = self.resolve_result(
@@ -92,6 +92,6 @@ class ReelExitHandler:
         )
         if config.IL_RECORD:
             self.il.stop_recording()
-            log.info("[🎣 收杆] 录制模式 — 请手动收杆")
+            log.info_t("reel.log.recordManualExit")
             return success
         return self.perform_exit(success)

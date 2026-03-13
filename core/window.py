@@ -84,10 +84,10 @@ class WindowManager:
         if results:
             self.hwnd, self._title = results[0]
             self._update_rect()
-            log.info(f"找到窗口: \"{self._title}\" (HWND={self.hwnd})")
+            log.info_t("window.log.found", title=self._title, hwnd=self.hwnd)
             return True
 
-        log.warning(f"未找到包含 \"{self.title_keyword}\" 的窗口 (已排除脚本自身)")
+        log.warning_t("window.log.notFoundByKeyword", keyword=self.title_keyword)
         self.hwnd = None
         return False
 
@@ -131,7 +131,7 @@ class WindowManager:
             return _get_foreground() == self.hwnd
 
         except Exception as e:
-            log.warning(f"聚焦窗口失败: {e}")
+            log.warning_t("window.log.focusFailed", error=e)
             return False
 
     # ────────────────── 区域 ──────────────────

@@ -191,7 +191,7 @@ class RoiOverlay:
         )
 
         if not self._hwnd:
-            log.warning("[Overlay] 创建覆盖窗口失败")
+            log.warning_t("overlay.log.createFailed")
             return
 
         user32.SetLayeredWindowAttributes(self._hwnd, _KEY_COLOR, 0, LWA_COLORKEY)

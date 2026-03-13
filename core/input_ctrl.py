@@ -61,7 +61,7 @@ class InputController:
         if ok:
             self._update_click_pos()
         else:
-            log.warning("无法聚焦 VRChat 窗口")
+            log.warning_t("input.focusGameFailed")
         return ok
 
     def move_to_game_center(self):
@@ -116,10 +116,10 @@ class InputController:
         try:
             osc = _get_osc()
         except ImportError:
-            log.warning("[摇头] python-osc 未安装, 跳过摇头 (pip install python-osc)")
+            log.warning_t("input.shakeOscMissing")
             return
         except Exception as e:
-            log.warning(f"[摇头] OSC 客户端创建失败: {e}")
+            log.warning_t("input.shakeOscClientFailed", error=e)
             return
         try:
             self._osc_reset_all(osc)
@@ -133,7 +133,7 @@ class InputController:
             osc.send_message("/input/LookLeft", 0)
             time.sleep(0.05)
         except Exception as e:
-            log.warning(f"[摇头] OSC 发送失败: {e}")
+            log.warning_t("input.shakeOscSendFailed", error=e)
 
     # ────────────────── 防卡杆: 跳跃 (OSC /input/Jump) ──────────────────
 
@@ -142,10 +142,10 @@ class InputController:
         try:
             osc = _get_osc()
         except ImportError:
-            log.warning("[跳跃] python-osc 未安装, 跳过 (pip install python-osc)")
+            log.warning_t("input.jumpOscMissing")
             return
         except Exception as e:
-            log.warning(f"[跳跃] OSC 客户端创建失败: {e}")
+            log.warning_t("input.jumpOscClientFailed", error=e)
             return
         try:
             self._osc_reset_all(osc)
@@ -154,7 +154,7 @@ class InputController:
             osc.send_message("/input/Jump", 0)
             time.sleep(0.1)
         except Exception as e:
-            log.warning(f"[跳跃] OSC 发送失败: {e}")
+            log.warning_t("input.jumpOscSendFailed", error=e)
 
     # ────────────────── 安全 ──────────────────
 

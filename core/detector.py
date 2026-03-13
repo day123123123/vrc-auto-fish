@@ -67,7 +67,7 @@ class ImageDetector:
             else:
                 self.templates[key] = None
                 self.templates_gray[key] = None
-                log.warning(f"  ✗ {fname:<15s}  (未找到)")
+                log.warning_t("detector.log.templateMissing", name=fname)
 
     # ══════════════════ GPU / CUDA ══════════════════
 
@@ -95,16 +95,14 @@ class ImageDetector:
                 dev = cv2.cuda.getDevice()
                 dev_info = cv2.cuda.DeviceInfo(dev)
                 vram_mb = dev_info.totalMemory() // 1048576
-                log.info(f"[引擎] ✓ CUDA 已启用: GPU #{dev} ({vram_mb} MB)")
-                log.info(
-                    f"  GPU模板缓存: {len(self._gpu_templates)} 个"
-                )
+                log.info_t("detector.log.cudaEnabled", device=dev, vram_mb=vram_mb)
+                log.info_t("detector.log.gpuTemplateCache", count=len(self._gpu_templates))
                 return
         except Exception as e:
             self._use_cuda = False
             self._cuda_matcher = None
             self._gpu_templates = {}
-            log.debug(f"[引擎] CUDA 初始化失败: {e}")
+            log.debug_t("detector.log.cudaInitFailed", error=e)
 
         pass  # 静默 CPU 模式
 
@@ -203,7 +201,12 @@ class ImageDetector:
             return (max_loc[0] + ox, max_loc[1] + oy, tw, th, max_val)
 
         if self.debug_report:
-            log.debug(f"  {tmpl_key}: 最佳置信度 {max_val:.3f} (阈值 {threshold})")
+            log.debug_t(
+                "detector.log.bestConfidence",
+                name=tmpl_key,
+                score=max_val,
+                threshold=threshold,
+            )
         return None
 
     # ══════════════════ 多尺度匹配 ══════════════════
@@ -401,9 +404,21 @@ class ImageDetector:
 
         if self.debug_report:
             if best_match:
-                log.debug(f"  {tmpl_key}(多尺度): ✓ 置信度 {best_val:.3f} @ scale={best_scale:.2f} (阈值 {threshold})")
+                log.debug_t(
+                    "detector.log.multiscaleHit",
+                    name=tmpl_key,
+                    score=best_val,
+                    scale=best_scale,
+                    threshold=threshold,
+                )
             else:
-                log.debug(f"  {tmpl_key}(多尺度): ✗ 最佳置信度 {best_val:.3f} @ scale={best_scale:.2f} (阈值 {threshold})")
+                log.debug_t(
+                    "detector.log.multiscaleMiss",
+                    name=tmpl_key,
+                    score=best_val,
+                    scale=best_scale,
+                    threshold=threshold,
+                )
 
         return best_match
 
@@ -708,7 +723,7 @@ class ImageDetector:
         if not candidates:
             if self.debug_report:
                 total = int(cv2.countNonZero(mask))
-                log.debug(f"  颜色鱼检测: 饱和像素={total}, 无合格轮廓")
+                log.debug_t("detector.log.colorFishNoContour", total=total)
             return None
 
         # 返回最大的候选 (最可能是鱼)
@@ -819,7 +834,7 @@ class ImageDetector:
 
         if best_contour is None:
             if self.debug_report:
-                log.debug("  颜色轨道检测: ✗ 未找到细长蓝色区域")
+                log.debug_t("detector.log.colorTrackMissing")
             return None
 
         # ── fitLine 精确计算角度 ──

@@ -71,9 +71,9 @@ class ILAdapter:
                 self.device = "cuda"
             self.policy = model
             norm_info = "含归一化" if self.norm_mean is not None else "无归一化"
-            log.info(f"[IL] 模型已加载 ({self.device}, {norm_info})")
+            log.info_t("il.log.modelLoaded", device=self.device, norm_info=norm_info)
         except Exception as e:
-            log.warning(f"[IL] 模型加载失败: {e}")
+            log.warning_t("il.log.modelLoadFailed", error=e)
             self.policy = None
 
     def start_recording(self):
@@ -94,7 +94,7 @@ class ILAdapter:
         self.prev_fish_cy = None
         self.mouse_prev = 0
         self.history.clear()
-        log.info(f"[IL] 录制开始 → {path}")
+        log.info_t("il.log.recordStarted", path=path)
 
     def stop_recording(self):
         """结束录制。"""
@@ -102,7 +102,7 @@ class ILAdapter:
             self.file.close()
             self.file = None
             self.writer = None
-            log.info("[IL] 录制结束")
+            log.info_t("il.log.recordStopped")
 
     @staticmethod
     def is_mouse_pressed() -> bool:

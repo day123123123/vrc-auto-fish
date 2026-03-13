@@ -187,7 +187,7 @@ class ScreenCapture:
                     user32.ReleaseDC(hwnd, wDC)
             except Exception:
                 pass
-            log.debug(f"PrintWindow 异常: {e}")
+            log.debug_t("screen.log.printWindowException", error=e)
             return None
 
     def _test_printwindow(self, hwnd) -> bool:
@@ -203,16 +203,15 @@ class ScreenCapture:
         mean_val = float(np.mean(img))
         if mean_val > 5.0:
             h, w = img.shape[:2]
-            log.info(
-                f"✓ PrintWindow 可用 ({w}×{h}, 亮度={mean_val:.1f}) "
-                f"— VRChat 被遮挡也能正确截图"
+            log.info_t(
+                "screen.log.printWindowAvailable",
+                width=w,
+                height=h,
+                mean=mean_val,
             )
             return True
         else:
-            log.warning(
-                f"✗ PrintWindow 返回黑屏 (亮度={mean_val:.1f}) "
-                f"— 请保持 VRChat 窗口不被遮挡!"
-            )
+            log.warning_t("screen.log.printWindowBlack", mean=mean_val)
             return False
 
     # ────────────────── mss 截取 (回退) ──────────────────
@@ -284,7 +283,7 @@ class ScreenCapture:
         """保存调试截图到 debug/ 目录"""
         path = os.path.join(config.DEBUG_DIR, f"{name}.png")
         cv2.imwrite(path, image)
-        log.debug(f"调试截图已保存: {path}")
+        log.debug_t("screen.log.debugSaved", path=path)
 
     def reset_capture_method(self):
         """
@@ -293,4 +292,4 @@ class ScreenCapture:
         """
         self._use_printwindow = None
         self._pw_tested_hwnd = None
-        log.info("截取方式已重置，下次截图时将重新检测")
+        log.info_t("screen.log.captureReset")
