@@ -77,46 +77,100 @@ python main.py
 └── start.bat            # 单独启动程序
 ```
 
-## YOLO 模型训练
+## 训练与打标
 
-如果你只是想重新训练当前主程序使用的旧版 YOLO 检测模型，可以继续使用 `yolo/` 下的旧脚本：
+当前仓库不是“旧脚本 / 新脚本”的简单替换关系，而是基于共享的 `trainer_common/` 提供了两条训练 profile：
 
-```bash
-python -m yolo.collect
-python -m yolo.label
-python -m yolo.train
+- `yolo/`：主程序运行时使用的 `runtime_yolo` 数据链路
+- `fish_trainer/`：独立多颜色鱼数据链路 `multicolor`
+
+两者共享采集、标注、训练和数据目录管理的底层实现，但数据目录和训练产物互相独立：
+
+```mermaid
+flowchart TD
+    TC[trainer_common]
+    Y[yolo profile]
+    F[fish_trainer profile]
+    YD[yolo/dataset]
+    YR[yolo/runs]
+    FD[fish_trainer/dataset]
+    FR[fish_trainer/runs]
+
+    TC --> Y
+    TC --> F
+    Y --> YD
+    Y --> YR
+    F --> FD
+    F --> FR
 ```
 
-当前 `yolo.label` 已支持更顺手的补标流程：
+### 我该用哪条链路
 
-- `python -m yolo.label --predict-model yolo\runs\fish_detect\weights\best.pt`: 用现有模型做自动预标
-- `--auto-predict`: 打开图片时自动先跑一遍预测
-- 鼠标右键选中已有框后，会自动切换到该框对应类别
-- 选中框后直接左键重画，会覆盖旧框
-- `J`: 回到上一张图片
-- `Ctrl+D`: 删除当前图片文件并跳到下一张
-- 翻页时不会自动选中框，但会保留当前激活类别
+- 如果你要训练**主程序运行时实际使用**的模型，或者想用**自动打标**，优先用 `yolo/`
+- 如果你要维护一套**独立的多颜色鱼数据集**，使用 GUI、导出 zip、迁移旧 `yolo/dataset` 数据，优先用 `fish_trainer/`
 
-如果要补标已经进入 `train/` 或 `val/` 的图片：
+### `yolo/`：运行时模型链路
+
+`yolo/` 现在仍然是主程序运行时模型 profile，不是废弃旧链路。其数据目录为 `yolo/dataset`，训练输出目录为 `yolo/runs`。
+
+常用命令：
 
 ```bash
+python -m yolo.collect --fps 2.0 --roi --max 200
+python -m yolo.label --split 0.2
 python -m yolo.label --relabel
+python -m yolo.train --model yolov8n.pt --epochs 80 --imgsz 640 --batch -1
+python -m yolo.train --resume
 ```
 
-如果你要做“多颜色鱼”的独立采集 / 标注 / 迁移 / 训练，优先使用新的 `fish_trainer/` 工具链。
+#### 自动打标
 
-- 工具总说明: [`fish_trainer/README.zh-CN.md`](fish_trainer/README.zh-CN.md)
-- 适用场景: 多颜色鱼类别、旧 `fish` 标注兼容迁移、独立训练流程
-- 入口命令:
+只有 `yolo.label` 支持自动打标，最常用的命令是：
 
 ```bash
-python -m fish_trainer.collect
-python -m fish_trainer.label
-python -m fish_trainer.migrate_labels
-python -m fish_trainer.train
+python -m yolo.label --predict-model yolo\runs\fish_detect\weights\best.pt
+python -m yolo.label --predict-model yolo\runs\fish_detect\weights\best.pt --auto-predict
+python -m yolo.label --relabel --predict-model yolo\runs\fish_detect\weights\best.pt --auto-predict
 ```
 
-这样主 README 只保留总入口，具体快捷键、类别定义、迁移方式和训练参数请直接看 [`fish_trainer/README.zh-CN.md`](fish_trainer/README.zh-CN.md)。
+常用参数：
+
+- `--predict-model`：指定自动打标模型路径
+- `--predict-conf`：自动打标置信度阈值，默认 `0.25`
+- `--predict-device`：推理设备，支持 `auto/cpu/cuda`
+- `--auto-predict`：打开图片时自动先跑一次预测
+- `--multi-per-class`：允许同类多个框；默认每类只保留一个最高置信度框
+
+补充说明：
+
+- `--auto-predict` 必须配合 `--predict-model` 使用
+- 在标注器里按 `A` 可以对当前图片执行一次自动打标
+- `yolo.label` 支持右键选框、左键重画覆盖、`J` 回上一张、`Ctrl+D` 删除当前图片、`[` / `]` 缩放已选框和 `,` `.` `;` `'` 微调框
+- 当前 `yolo` 标注器类别包含运行时相关的 `progress`、`prog_hook`，并已追加 `fish_teal`
+
+### `fish_trainer/`：独立多颜色鱼链路
+
+`fish_trainer/` 对应另一条共享训练框架上的 profile，数据目录为 `fish_trainer/dataset`，训练输出目录为 `fish_trainer/runs`。它更适合独立采集、迁移旧数据、桌面 GUI 操作和导出已标注数据。
+
+入口命令：
+
+```bash
+python -m fish_trainer.collect --fps 2.0 --roi --max 200
+python -m fish_trainer.label --split 0.2
+python -m fish_trainer.label --relabel
+python -m fish_trainer.migrate_labels --with-unlabeled
+python -m fish_trainer.train --model yolov8n.pt --epochs 80 --imgsz 640 --batch -1
+python -m fish_trainer.train --resume
+python -m fish_trainer.gui
+```
+
+具体类别、快捷键、迁移说明和 GUI 用法请看 [`fish_trainer/README.zh-CN.md`](fish_trainer/README.zh-CN.md)。
+
+### 当前需要注意的类目现状
+
+- 标注器已经支持 `fish_teal`
+- `yolo.label` 还额外支持 `prog_hook`
+- 但当前训练 YAML 是否已完全同步到所有新增类别，需要单独核对；文档以下面各工具当前实现为准，不默认夸大为“训练配置已完整覆盖全部新增类”
 
 ## 更新补丁
 

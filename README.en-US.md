@@ -77,46 +77,100 @@ python main.py
 └── start.bat            # Start program only
 ```
 
-## YOLO Model Training
+## Training And Labeling
 
-If you only want to retrain the legacy YOLO detector currently used by the main app, you can keep using the scripts under `yolo/`:
+This repository is no longer a simple "old scripts vs new scripts" split. It now exposes two training profiles backed by the shared `trainer_common/` implementation:
 
-```bash
-python -m yolo.collect
-python -m yolo.label
-python -m yolo.train
+- `yolo/`: the `runtime_yolo` data pipeline used by the main app at runtime
+- `fish_trainer/`: the standalone multi-color fish pipeline `multicolor`
+
+They share collection, labeling, training, and dataset-management logic, but keep separate dataset and run directories:
+
+```mermaid
+flowchart TD
+    TC[trainer_common]
+    Y[yolo profile]
+    F[fish_trainer profile]
+    YD[yolo/dataset]
+    YR[yolo/runs]
+    FD[fish_trainer/dataset]
+    FR[fish_trainer/runs]
+
+    TC --> Y
+    TC --> F
+    Y --> YD
+    Y --> YR
+    F --> FD
+    F --> FR
 ```
 
-The current `yolo.label` workflow also includes a more convenient relabeling flow:
+### Which pipeline should I use?
 
-- `python -m yolo.label --predict-model yolo\runs\fish_detect\weights\best.pt`: run auto pre-labeling with an existing model
-- `--auto-predict`: run prediction automatically when an image is opened
-- Right-click an existing box to switch to that box's class automatically
-- Left-click and redraw after selecting a box to overwrite it directly
-- `J`: go back to the previous image
-- `Ctrl+D`: delete the current image file and jump to the next one
-- When flipping pages, boxes are not auto-selected, but the active class is preserved
+- Use `yolo/` if you want to train the model actually consumed by the main app at runtime, or if you need **auto-labeling**
+- Use `fish_trainer/` if you want an independent multi-color dataset workflow with GUI support, zip export, and migration from the old `yolo/dataset`
 
-If you need to relabel images that are already inside `train/` or `val/`:
+### `yolo/`: runtime model pipeline
+
+`yolo/` is still the runtime model profile used by the main application. It is not just a deprecated legacy path. Its dataset lives under `yolo/dataset`, and training output goes to `yolo/runs`.
+
+Common commands:
 
 ```bash
+python -m yolo.collect --fps 2.0 --roi --max 200
+python -m yolo.label --split 0.2
 python -m yolo.label --relabel
+python -m yolo.train --model yolov8n.pt --epochs 80 --imgsz 640 --batch -1
+python -m yolo.train --resume
 ```
 
-If you want a standalone pipeline for collecting, labeling, migrating, and training **multi-color fish**, use the newer `fish_trainer/` toolchain instead.
+#### Auto-labeling
 
-- Full tool guide: [`fish_trainer/README.en-US.md`](fish_trainer/README.en-US.md)
-- Best for: multi-color fish classes, compatibility migration from legacy `fish` labels, and an independent training workflow
-- Entry commands:
+Only `yolo.label` supports auto-labeling. The most common commands are:
 
 ```bash
-python -m fish_trainer.collect
-python -m fish_trainer.label
-python -m fish_trainer.migrate_labels
-python -m fish_trainer.train
+python -m yolo.label --predict-model yolo\runs\fish_detect\weights\best.pt
+python -m yolo.label --predict-model yolo\runs\fish_detect\weights\best.pt --auto-predict
+python -m yolo.label --relabel --predict-model yolo\runs\fish_detect\weights\best.pt --auto-predict
 ```
 
-The main README only keeps the overview. For shortcut keys, class definitions, migration rules, and training parameters, see [`fish_trainer/README.en-US.md`](fish_trainer/README.en-US.md).
+Key options:
+
+- `--predict-model`: model path used for auto-labeling
+- `--predict-conf`: confidence threshold for auto-labeling, default `0.25`
+- `--predict-device`: inference device, supports `auto/cpu/cuda`
+- `--auto-predict`: run prediction automatically when an image is opened
+- `--multi-per-class`: allow multiple boxes per class; by default only the highest-confidence box per class is kept
+
+Notes:
+
+- `--auto-predict` must be used together with `--predict-model`
+- Press `A` inside the labeler to auto-label the current image once
+- `yolo.label` supports right-click box selection, left-drag overwrite, `J` for previous image, `Ctrl+D` to delete the current image, `[` / `]` to resize the selected box, and `,` `.` `;` `'` for box nudging
+- The current `yolo` labeler includes runtime-specific classes such as `progress`, `prog_hook`, and the newly appended `fish_teal` on key `0`
+
+### `fish_trainer/`: standalone multi-color pipeline
+
+`fish_trainer/` is the other profile on top of the same shared training framework. Its dataset lives under `fish_trainer/dataset`, and training output goes to `fish_trainer/runs`. It is better suited for independent collection, migration, GUI-based workflows, and exporting labeled data.
+
+Entry commands:
+
+```bash
+python -m fish_trainer.collect --fps 2.0 --roi --max 200
+python -m fish_trainer.label --split 0.2
+python -m fish_trainer.label --relabel
+python -m fish_trainer.migrate_labels --with-unlabeled
+python -m fish_trainer.train --model yolov8n.pt --epochs 80 --imgsz 640 --batch -1
+python -m fish_trainer.train --resume
+python -m fish_trainer.gui
+```
+
+For class definitions, hotkeys, migration details, and GUI usage, see [`fish_trainer/README.en-US.md`](fish_trainer/README.en-US.md).
+
+### Current class caveat
+
+- The labelers already support `fish_teal`
+- `yolo.label` also supports `prog_hook`
+- Training YAML files may not yet declare every newly added labeling class; this documentation describes the current tool behavior and does not overstate training-yaml coverage
 
 ## Patch Updates
 

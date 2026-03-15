@@ -77,46 +77,100 @@ python main.py
 └── start.bat            # プログラムのみ起動
 ```
 
-## YOLO モデル学習
+## 学習とラベル付け
 
-メインアプリで現在使っている旧 YOLO 検出モデルだけを再学習したい場合は、`yolo/` 配下の旧スクリプトをそのまま使えます。
+このリポジトリは、もはや単純な「旧スクリプト / 新スクリプト」の構成ではありません。共有実装 `trainer_common/` の上に、2 つの学習 profile が存在します。
 
-```bash
-python -m yolo.collect
-python -m yolo.label
-python -m yolo.train
+- `yolo/`: メインアプリが実行時に使う `runtime_yolo` データパイプライン
+- `fish_trainer/`: 独立した多色魚データパイプライン `multicolor`
+
+両者は収集、ラベル付け、学習、データセット管理のロジックを共有していますが、データセットと学習出力ディレクトリは分かれています。
+
+```mermaid
+flowchart TD
+    TC[trainer_common]
+    Y[yolo profile]
+    F[fish_trainer profile]
+    YD[yolo/dataset]
+    YR[yolo/runs]
+    FD[fish_trainer/dataset]
+    FR[fish_trainer/runs]
+
+    TC --> Y
+    TC --> F
+    Y --> YD
+    Y --> YR
+    F --> FD
+    F --> FR
 ```
 
-現在の `yolo.label` では、より扱いやすい再ラベル付けフローも利用できます。
+### どちらを使うべきか
 
-- `python -m yolo.label --predict-model yolo\runs\fish_detect\weights\best.pt`: 既存モデルで自動プレラベルを実行
-- `--auto-predict`: 画像を開いたときに自動で予測を実行
-- 既存ボックスを右クリックすると、そのボックスのクラスに自動で切り替え
-- ボックス選択後に左クリックで描き直すと、既存ボックスをそのまま上書き
-- `J`: 前の画像に戻る
-- `Ctrl+D`: 現在の画像ファイルを削除して次の画像へ進む
-- ページ切り替え時にボックスは自動選択されないが、現在のアクティブクラスは維持される
+- メインアプリが実際に使う実行時モデルを学習したい、または**自動打標**を使いたい場合は `yolo/`
+- GUI、zip 出力、旧 `yolo/dataset` からの移行を含む独立した多色魚ワークフローを使いたい場合は `fish_trainer/`
 
-すでに `train/` または `val/` に入っている画像を再ラベル付けしたい場合:
+### `yolo/`: 実行時モデルパイプライン
+
+`yolo/` は今でもメインアプリが使う実行時モデル profile であり、廃止済みの旧経路ではありません。データセットは `yolo/dataset`、学習出力は `yolo/runs` に保存されます。
+
+よく使うコマンド:
 
 ```bash
+python -m yolo.collect --fps 2.0 --roi --max 200
+python -m yolo.label --split 0.2
 python -m yolo.label --relabel
+python -m yolo.train --model yolov8n.pt --epochs 80 --imgsz 640 --batch -1
+python -m yolo.train --resume
 ```
 
-多色魚の収集、ラベル付け、旧ラベル移行、学習を独立した流れで行いたい場合は、新しい `fish_trainer/` ツールチェーンを使ってください。
+#### 自動打標
 
-- ツール全体の説明: [`fish_trainer/README.ja-JP.md`](fish_trainer/README.ja-JP.md)
-- 向いている用途: 多色魚クラス、旧 `fish` ラベルとの互換移行、独立した学習ワークフロー
-- 起動コマンド:
+自動打標に対応しているのは `yolo.label` だけです。よく使うコマンドは次の通りです。
 
 ```bash
-python -m fish_trainer.collect
-python -m fish_trainer.label
-python -m fish_trainer.migrate_labels
-python -m fish_trainer.train
+python -m yolo.label --predict-model yolo\runs\fish_detect\weights\best.pt
+python -m yolo.label --predict-model yolo\runs\fish_detect\weights\best.pt --auto-predict
+python -m yolo.label --relabel --predict-model yolo\runs\fish_detect\weights\best.pt --auto-predict
 ```
 
-この README では概要のみを扱います。ショートカットキー、クラス定義、移行ルール、学習パラメータの詳細は [`fish_trainer/README.ja-JP.md`](fish_trainer/README.ja-JP.md) を参照してください。
+主なオプション:
+
+- `--predict-model`: 自動打標に使うモデルパス
+- `--predict-conf`: 自動打標の信頼度しきい値。既定値は `0.25`
+- `--predict-device`: 推論デバイス。`auto/cpu/cuda` を指定可能
+- `--auto-predict`: 画像を開いたときに自動で予測を実行
+- `--multi-per-class`: 同一クラスの複数ボックスを許可。既定では各クラスの最高信頼度ボックスのみ保持
+
+補足:
+
+- `--auto-predict` は `--predict-model` と一緒に使う必要があります
+- ラベラー内で `A` を押すと、現在の画像に対して 1 回だけ自動打標できます
+- `yolo.label` は右クリック選択、左ドラッグ上書き、`J` で前画像、`Ctrl+D` で現在画像削除、`[` / `]` で選択ボックス拡縮、`,` `.` `;` `'` で微調整に対応しています
+- 現在の `yolo` ラベラーには `progress`、`prog_hook`、そしてキー `0` に割り当てられた新しい `fish_teal` が含まれます
+
+### `fish_trainer/`: 独立多色魚パイプライン
+
+`fish_trainer/` は同じ共有学習フレームワーク上のもう一つの profile です。データセットは `fish_trainer/dataset`、学習出力は `fish_trainer/runs` に保存されます。独立した収集、旧データ移行、GUI ベースの運用、ラベル済みデータの出力に向いています。
+
+入口コマンド:
+
+```bash
+python -m fish_trainer.collect --fps 2.0 --roi --max 200
+python -m fish_trainer.label --split 0.2
+python -m fish_trainer.label --relabel
+python -m fish_trainer.migrate_labels --with-unlabeled
+python -m fish_trainer.train --model yolov8n.pt --epochs 80 --imgsz 640 --batch -1
+python -m fish_trainer.train --resume
+python -m fish_trainer.gui
+```
+
+クラス定義、ショートカット、移行詳細、GUI の使い方は [`fish_trainer/README.ja-JP.md`](fish_trainer/README.ja-JP.md) を参照してください。
+
+### 現在のクラスに関する注意
+
+- ラベラーはすでに `fish_teal` をサポートしています
+- `yolo.label` はさらに `prog_hook` もサポートしています
+- 学習 YAML が新しく追加された全ラベルクラスをまだ宣言していない可能性があるため、この README では現在のツール挙動を記述し、学習 YAML 側の完全同期までは断定しません
 
 ## パッチ更新
 
