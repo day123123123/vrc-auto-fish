@@ -7,3 +7,5 @@ psutil>=5.9.0
 pywin32>=305
 python-osc>=1.8.0
 ultralytics>=8.0.0
+ncnn>=1.0.20260114
+pnnx>=20260112

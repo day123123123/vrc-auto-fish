@@ -24,7 +24,12 @@ try:
     _YOLO_AVAILABLE = True
 except ImportError:
     pass
-
+_NCNN_AVAILABLE = False
+try:
+    import ncnn
+    _NCNN_AVAILABLE = True
+except ImportError:
+    pass
 
 class YoloDetector:
     """YOLO-based fishing game detector."""
@@ -59,6 +64,7 @@ class YoloDetector:
         import config as _cfg
         dev_pref = getattr(_cfg, "YOLO_DEVICE", "auto")
         cuda_ok = False
+        ncnn_ok = False
         try:
             import torch
             cuda_ok = torch.cuda.is_available()
@@ -70,10 +76,31 @@ class YoloDetector:
             target_dev = 0
         else:
             target_dev = 0
+        if _NCNN_AVAILABLE and not cuda_ok:
+            # 检测ncnn模型
+            ncnn_path = model_path.removesuffix("best.pt")+"best_ncnn_model"
+            if not os.path.exists(ncnn_path):
+                log.warning_t("yolo.log.ncnnModelNotFound", model_path=ncnn_path)
+                self.model.export(format="ncnn", half=True, imgsz=640)
+            gpu_count = ncnn.get_gpu_count()
+            if gpu_count > 0:
+                for i in range(gpu_count):
+                    gpu_info = ncnn.get_gpu_info(i)
+                    dev_name = gpu_info.device_name()
+                    print(f"{i} {dev_name}")
+                    # 避免亮机核显
+                    if not dev_name.startswith("AMD Radeon(TM)"):
+                        target_dev = "vulkan:" + str(i)
+                        break
+                    # target_dev = "vulkan:" + str(ncnn.get_default_gpu_index())
+            else:
+                target_dev = "cpu"
+            self.model = YOLO(ncnn_path, task="detect")
+            ncnn_ok = True
 
         warmup_img = np.zeros((640, 640, 3), dtype=np.uint8)
 
-        if target_dev != "cpu":
+        if target_dev != "cpu" and not ncnn_ok:
             try:
                 pass  # 静默加载
                 self.model.predict(
@@ -92,14 +119,21 @@ class YoloDetector:
                 if dev_pref == "gpu":
                     raise RuntimeError(f"[YOLO] 强制 GPU 模式但初始化失败: {e}")
                 log.warning_t("yolo.log.gpuFallback", error=e)
-
-        self._device = "cpu"
-        pass  # 静默加载 CPU
-        self.model.predict(
-            warmup_img, conf=0.5, device="cpu",
-            verbose=False, imgsz=640,
-        )
-        log.info_t("yolo.log.cpuReady", names=self.model.names)
+        if ncnn_ok:
+            self._device = target_dev
+            self.model.predict(
+                warmup_img, conf=0.5, device=target_dev,
+                verbose=False, imgsz=640,
+            )
+            log.info_t("yolo.log.ncnnReady", device=target_dev, names=self.model.names)
+        else:
+            self._device = "cpu"
+            pass  # 静默加载 CPU
+            self.model.predict(
+                warmup_img, conf=0.5, device="cpu",
+                verbose=False, imgsz=640,
+            )
+            log.info_t("yolo.log.cpuReady", names=self.model.names)
 
     def detect(self, screen, roi=None):
         """
@@ -131,7 +165,6 @@ class YoloDetector:
             if rw > 10 and rh > 10:
                 img = screen[ry:ry+rh, rx:rx+rw].copy()
                 ox, oy = rx, ry
-
         results = self.model.predict(
             img, conf=self.conf, device=self._device,
             verbose=False, imgsz=640,
@@ -185,7 +218,6 @@ class YoloDetector:
             elif class_name == "prog_hook":
                 if detections["prog_hook"] is None or conf > detections["prog_hook"][4]:
                     detections["prog_hook"] = det
-
         return detections
 
     def detect_track(self, screen, roi=None):
