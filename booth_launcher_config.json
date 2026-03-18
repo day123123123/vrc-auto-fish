@@ -1,0 +1,12 @@
+{
+  "window_title": "VRC Auto Fish Launcher",
+  "repo_url": "https://github.com/day123123123/vrc-auto-fish.git",
+  "branch": "main",
+  "app_dir_name": "VRC Auto Fish Booth",
+  "repo_dir_name": "repo",
+  "venv_dir_name": ".venv",
+  "entrypoint": "main.py",
+  "show_update_prompt": true,
+  "update_log_count": 20,
+  "auto_close_after_launch_ms": 1200
+}
