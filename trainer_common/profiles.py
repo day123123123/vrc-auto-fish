@@ -71,3 +71,34 @@ PROFILES: dict[str, TrainerProfile] = {
 
 def get_profile(name: str) -> TrainerProfile:
     return PROFILES[name]
+
+
+class CustomPathProfile:
+    """包装 TrainerProfile，支持自定义数据目录"""
+    def __init__(self, base_profile: TrainerProfile, custom_dataset_root: str | None = None):
+        self._base_profile = base_profile
+        self._custom_dataset_root = custom_dataset_root
+    
+    def __getattr__(self, name):
+        """代理所有属性访问到 base_profile"""
+        return getattr(self._base_profile, name)
+    
+    @property
+    def dataset_root(self) -> str:
+        """返回自定义的数据目录或默认值"""
+        if self._custom_dataset_root:
+            return self._custom_dataset_root
+        return self._base_profile.dataset_root
+
+    @property
+    def runs_root(self) -> str:
+        """返回自定义的运行结果目录或默认值"""
+        if self._custom_dataset_root:
+            # 默认将 runs 放在自定义数据目录下
+            return os.path.join(self._custom_dataset_root, "runs")
+        return self._base_profile.runs_root
+
+    @property
+    def data_yaml(self) -> str:
+        """返回自定义的 data.yaml 路径"""
+        return os.path.join(self.dataset_root, self._base_profile.data_yaml_name)

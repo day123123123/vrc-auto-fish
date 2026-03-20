@@ -69,14 +69,18 @@ def build_toggle_panel(app, parent, pad):
     frm_toggles = ttk.Frame(parent)
     frm_toggles.pack(fill="x", **pad)
 
+    # 第一行：基础开关
+    row1 = ttk.Frame(frm_toggles)
+    row1.pack(fill="x", pady=1)
+
     app.var_topmost = tk.BooleanVar(value=False)
     ttk.Checkbutton(
-        frm_toggles, text=app.tr("toggle.topmost"), variable=app.var_topmost, command=app._on_topmost
+        row1, text=app.tr("toggle.topmost"), variable=app.var_topmost, command=app._on_topmost
     ).pack(side="left", padx=4)
 
     app.var_show_debug = tk.BooleanVar(value=config.SHOW_DEBUG)
     chk_debug = ttk.Checkbutton(
-        frm_toggles, text=app.tr("toggle.debugWindow"),
+        row1, text=app.tr("toggle.debugWindow"),
         variable=app.var_show_debug, command=app._on_debug_toggle
     )
     chk_debug.pack(side="left", padx=4)
@@ -86,7 +90,7 @@ def build_toggle_panel(app, parent, pad):
         value=getattr(config, "SKIP_SUCCESS_CHECK", False)
     )
     chk_skip = ttk.Checkbutton(
-        frm_toggles, text=app.tr("toggle.skipSuccess"),
+        row1, text=app.tr("toggle.skipSuccess"),
         variable=app.var_skip_success, command=app._on_skip_success_toggle
     )
     chk_skip.pack(side="left", padx=4)
@@ -94,7 +98,7 @@ def build_toggle_panel(app, parent, pad):
 
     app.var_sync_pd_mode = tk.BooleanVar(value=getattr(config, "SYNC_PD_MODE", False))
     chk_sync_pd = ttk.Checkbutton(
-        frm_toggles,
+        row1,
         text=app.tr("toggle.syncPdMode"),
         variable=app.var_sync_pd_mode,
         command=app._on_sync_pd_mode_toggle,
@@ -102,14 +106,18 @@ def build_toggle_panel(app, parent, pad):
     chk_sync_pd.pack(side="left", padx=4)
     app._create_tooltip(chk_sync_pd, app.tr("tooltip.syncPdMode"))
 
-    ttk.Label(frm_toggles, text=app.tr("toggle.area")).pack(side="left", padx=(10, 2))
+    # 第二行：区域与语言
+    row2 = ttk.Frame(frm_toggles)
+    row2.pack(fill="x", pady=1)
+
+    ttk.Label(row2, text=app.tr("toggle.area")).pack(side="left", padx=(4, 2))
     app.var_roi = tk.StringVar(value=app.tr("toggle.roiUnset"))
-    app.lbl_roi = ttk.Label(frm_toggles, textvariable=app.var_roi, foreground="gray")
+    app.lbl_roi = ttk.Label(row2, textvariable=app.var_roi, foreground="gray")
     app.lbl_roi.pack(side="left")
 
-    ttk.Label(frm_toggles, text=app.tr("toggle.language")).pack(side="left", padx=(10, 2))
+    ttk.Label(row2, text=app.tr("toggle.language")).pack(side="left", padx=(16, 2))
     cmb_lang = ttk.Combobox(
-        frm_toggles,
+        row2,
         textvariable=app.var_language,
         values=list(app._language_label_to_code.keys()),
         state="readonly",
