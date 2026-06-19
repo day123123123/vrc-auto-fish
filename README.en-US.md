@@ -34,8 +34,12 @@ If you downloaded the `Launcher`, you usually do not need to run `启动.bat`, `
 ### Option 2: Manual installation
 
 ```bash
-# Install PyTorch (GPU build)
+# Install PyTorch (NVIDIA build)
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
+# Install PyTorch (AMD build)
+# change gfx1030 to your GPU target
+pip install torch[device-gfx1030] rocm[devel,device-gfx1030] torchvision[device-gfx1030] --index-url https://rocm.nightlies.amd.com/whl-multi-arch/
 
 # Or CPU build
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
