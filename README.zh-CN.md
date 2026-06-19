@@ -32,8 +32,12 @@ VRChat 世界 **FISH!** 的自动钓鱼脚本。支持 YOLO 目标检测 + PD �
 ### 方式二：手动安装
 
 ```bash
-# 安装 PyTorch (GPU 版)
+# 安装 PyTorch (NVIDIA 版)
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
+# 安装 PyTorch (AMD 版)
+# 将gfx1030改为自己的GPU gfx名称
+pip install torch[device-gfx1030] rocm[devel,device-gfx1030] torchvision[device-gfx1030] --index-url https://rocm.nightlies.amd.com/whl-multi-arch/
 
 # 或 CPU 版
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu

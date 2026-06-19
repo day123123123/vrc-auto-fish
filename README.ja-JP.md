@@ -34,8 +34,12 @@ VRChat ワールド **FISH!** 向けの自動釣りスクリプトです。YOLO 
 ### 方法2: 手動インストール
 
 ```bash
-# PyTorch をインストール（GPU 版）
+# PyTorch をインストール（NVIDIA 版）
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
+# PyTorch をインストール（AMD 版）
+# gfx 1030をGPUターゲットに変更する
+pip install torch[device-gfx1030] rocm[devel,device-gfx1030] torchvision[device-gfx1030] --index-url https://rocm.nightlies.amd.com/whl-multi-arch/
 
 # または CPU 版
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
