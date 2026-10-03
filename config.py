@@ -55,6 +55,19 @@ IMG_DIR = resolve_resource_path("img", expect_dir=True)
 WINDOW_TITLE = "VRChat"
 
 # ═══════════════════════════════════════════════════════════
+#  鼠标输入方式
+#  ★ U6 (Unity 6) 之后 VRChat 不再响应 PostMessage 投递的鼠标消息,
+#    必须使用 SendInput 注入系统级真实鼠标事件。
+# ═══════════════════════════════════════════════════════════
+# "sendinput"   = 真实输入注入 (U6 及以后必需)
+#                 需要 VRChat 处于前台窗口, 会占用真实光标 (自动停在窗口中心)
+# "postmessage" = 旧版后台消息投递 (不抢焦点不占光标, U6 版本已失效)
+INPUT_MODE           = "sendinput"
+INPUT_FOCUS_DELAY    = 0.08       # 切前台后等待游戏激活的缓冲 (秒)
+INPUT_CLICK_HOLD_S   = 0.06       # click() 的按下时长 (秒)
+INPUT_RESTORE_CURSOR = True       # True=停止钓鱼后把光标还原到接管前的位置
+
+# ═══════════════════════════════════════════════════════════
 #  快捷键 (VRChat 内也可用)
 # ═══════════════════════════════════════════════════════════
 HOTKEY_TOGGLE = "F9"

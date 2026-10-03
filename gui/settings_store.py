@@ -265,6 +265,11 @@ class AppSettingsStore:
                     self.app.var_anti_mode.set(val)
             return True
 
+        if attr == "INPUT_MODE":
+            if str(val) in ("sendinput", "postmessage"):
+                self.apply_choice_setting("INPUT_MODE", str(val))
+            return True
+
         if attr == "SHAKE_HEAD_TIME":
             self.apply_choice_setting("SHAKE_HEAD_TIME", float(val))
             if hasattr(self.app, "var_shake_time"):

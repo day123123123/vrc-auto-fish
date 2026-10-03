@@ -54,6 +54,11 @@ python main.py
 3. Click "Select Region" to define the fishing mini-game detection area if needed
 4. Press `F9` to start auto fishing
 
+> **Note (U6 build)**: after U6, VRChat ignores mouse messages posted to its window, so the script now
+> injects real mouse events with `SendInput`. VRChat must stay in the foreground while fishing, and the
+> cursor is parked at the game window center (restored when you stop). On older VRChat builds you can set
+> `INPUT_MODE` back to `"postmessage"` in `config.py` or `settings.json` (no cursor/focus takeover).
+
 ## Hotkeys
 
 | Key | Function |

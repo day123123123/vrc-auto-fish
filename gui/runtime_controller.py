@@ -90,6 +90,7 @@ class AppRuntimeController:
         self.app.bot.running = False
         self.app.bot._force_minigame = False
         self.app.bot.input.safe_release()
+        self._restore_cursor()
         self.app.bot.shutdown_debug_overlay()
         self.app.btn_start.config(state="normal")
         self.app.btn_stop.config(state="disabled")
@@ -549,10 +550,20 @@ class AppRuntimeController:
         self.app.bot.running = False
         self.app.bot._force_minigame = False
         self.app.bot.input.safe_release()
+        self._restore_cursor()
         self.app.bot.shutdown_debug_overlay()
         self.app._save_settings()
         self.save_log()
         self.app.root.destroy()
+
+    def _restore_cursor(self):
+        """SendInput 模式下把光标还给用户 (旧版输入对象没有该方法)。"""
+        restore = getattr(self.app.bot.input, "restore_cursor", None)
+        if callable(restore):
+            try:
+                restore()
+            except Exception:
+                pass
 
     def save_log(self):
         path = os.path.join(config.DEBUG_DIR, "last_run.log")

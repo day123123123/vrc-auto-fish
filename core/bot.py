@@ -1126,6 +1126,8 @@ class FishingBot:
 
         if not config.IL_RECORD:
             self.input.safe_release()
+            # SendInput 模式下光标被脚本停在游戏窗口中心, 退出时还原
+            self.input.restore_cursor()
         self.state = "bot.state.stopped"
         log.info_t("bot.log.threadStopped")
         self.shutdown_debug_overlay()
