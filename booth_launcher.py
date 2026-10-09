@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -33,6 +35,21 @@ DEFAULT_CONFIG = {
     "update_log_count": 20,
     "auto_close_after_launch_ms": 1200,
 }
+
+GIT_DOWNLOAD_URL = "https://git-scm.com/download/win"
+PYTHON_DOWNLOAD_URL = "https://www.python.org/downloads/"
+
+# PATH に git が無い場合に探す標準的なインストール先
+# (Git for Windows / scoop / chocolatey)
+GIT_PATH_CANDIDATES = [
+    r"%ProgramFiles%\Git\cmd\git.exe",
+    r"%ProgramFiles(x86)%\Git\cmd\git.exe",
+    r"%LOCALAPPDATA%\Programs\Git\cmd\git.exe",
+    r"%ProgramFiles%\Git\bin\git.exe",
+    r"%ProgramFiles%\Git\mingw64\bin\git.exe",
+    r"%USERPROFILE%\scoop\shims\git.exe",
+    r"%ProgramData%\chocolatey\bin\git.exe",
+]
 
 PYTHON_CANDIDATES = [
     ["py", "-3.12"],
@@ -136,6 +153,7 @@ class BoothLauncherApp:
         self._build_ui()
 
         self.python_cmd: list[str] | None = None
+        self.git_cmd: list[str] = ["git"]
         self.worker = threading.Thread(target=self._worker_main, daemon=True)
         self.worker.start()
 
@@ -201,15 +219,18 @@ class BoothLauncherApp:
             self._set_retry_enabled(False)
             self._run_flow()
         except Exception as exc:
+            # 例外変数は except ブロックを抜けると消えるため, 既定引数で束縛しておく
+            # (束縛しないと root.after 経由のラムダで NameError になる)
+            message = f"起動に失敗しました。\n\n{exc}"
             self._append_log("")
             self._append_log(f"[エラー] {exc}")
             self._set_status("失敗しました")
             self._set_retry_enabled(True)
             self.root.after(
                 0,
-                lambda: messagebox.showerror(
+                lambda text=message: messagebox.showerror(
                     "VRC Auto Fish Launcher",
-                    f"起動に失敗しました。\n\n{exc}",
+                    text,
                 ),
             )
 
@@ -229,21 +250,56 @@ class BoothLauncherApp:
 
     def _ensure_tools(self):
         self._set_status("必要ツールを確認中...")
+
         self._append_log("[確認] Git を確認しています...")
-        if not self._command_available(["git", "--version"]):
-            raise LauncherError(
-                "Git が見つかりません。Git for Windows をインストールしてください:\n"
-                "https://git-scm.com/download/win"
+        git_cmd = self._find_git_command()
+        if git_cmd is None:
+            self._append_log("[エラー] Git が見つかりませんでした。")
+            self._prompt_missing_tool(
+                "Git が見つかりません",
+                "このランチャーは本体の取得・更新に Git を使用します。\n"
+                "Git for Windows をインストールしてから「再試行」を押してください。\n"
+                "インストール直後は PATH が反映されないことがあるため、"
+                "うまく認識されない場合はランチャーを再起動してください。",
+                GIT_DOWNLOAD_URL,
             )
+            raise LauncherError(
+                "Git が見つかりません。Git for Windows をインストールしてから再試行してください。"
+            )
+        self.git_cmd = git_cmd
+        self._append_log(f"[OK] 使用する Git: {' '.join(git_cmd)}")
 
         self._append_log("[確認] Python を確認しています...")
         self.python_cmd = self._find_python_command()
         if self.python_cmd is None:
+            self._append_log("[エラー] Python が見つかりませんでした。")
+            self._prompt_missing_tool(
+                "Python が見つかりません",
+                "本体の実行に Python 3.10 以上が必要です。\n"
+                "Python をインストールしてから「再試行」を押してください。\n"
+                "インストール時は「Add Python to PATH」にチェックを入れてください。",
+                PYTHON_DOWNLOAD_URL,
+            )
             raise LauncherError(
-                "Python 3.10 以上が見つかりません。Python をインストールしてください:\n"
-                "https://www.python.org/downloads/"
+                "Python 3.10 以上が見つかりません。Python をインストールしてから再試行してください。"
             )
         self._append_log(f"[OK] 使用する Python: {' '.join(self.python_cmd)}")
+
+    def _prompt_missing_tool(self, title: str, detail: str, url: str):
+        """必要な外部ツールが無いときにインストールを促し、ダウンロードページを開けるようにする。"""
+        self._append_log(f"[情報] ダウンロード先: {url}")
+        message = (
+            f"{detail}\n\n"
+            f"ダウンロード先:\n{url}\n\n"
+            "今すぐダウンロードページをブラウザーで開きますか？"
+        )
+        if not self._prompt_yes_no(title, message):
+            return
+        try:
+            webbrowser.open(url)
+            self._append_log("[情報] ダウンロードページをブラウザーで開きました。")
+        except Exception as exc:
+            self._append_log(f"[警告] ブラウザーを開けませんでした: {exc}")
 
     def _prepare_directories(self):
         self._set_status("作業フォルダを準備中...")
@@ -263,7 +319,7 @@ class BoothLauncherApp:
             self._append_log("[取得] リポジトリを初回クローンします...")
             self._run_command(
                 [
-                    "git",
+                    *self.git_cmd,
                     "clone",
                     "--depth",
                     "1",
@@ -276,8 +332,8 @@ class BoothLauncherApp:
             return
 
         self._append_log("[更新] 既存リポジトリを更新します...")
-        self._run_command(["git", "-C", str(repo_dir), "fetch", "origin", self.config.branch, "--depth", "1"])
-        self._run_command(["git", "-C", str(repo_dir), "checkout", self.config.branch])
+        self._run_command([*self.git_cmd, "-C", str(repo_dir), "fetch", "origin", self.config.branch, "--depth", "1"])
+        self._run_command([*self.git_cmd, "-C", str(repo_dir), "checkout", self.config.branch])
         update_count, updates = self._get_pending_updates(repo_dir)
         if update_count == 0:
             self._append_log("[更新] 新しい更新はありません。")
@@ -299,14 +355,14 @@ class BoothLauncherApp:
             return
 
         stashed = self._stash_if_needed(repo_dir)
-        self._run_command(["git", "-C", str(repo_dir), "pull", "--ff-only", "origin", self.config.branch])
+        self._run_command([*self.git_cmd, "-C", str(repo_dir), "pull", "--ff-only", "origin", self.config.branch])
         if stashed:
             self._append_log("[更新] ローカル設定を戻しています...")
-            self._run_command(["git", "-C", str(repo_dir), "stash", "pop"], check=False)
+            self._run_command([*self.git_cmd, "-C", str(repo_dir), "stash", "pop"], check=False)
 
     def _stash_if_needed(self, repo_dir: Path) -> bool:
         status = subprocess.run(
-            ["git", "-C", str(repo_dir), "status", "--porcelain"],
+            [*self.git_cmd, "-C", str(repo_dir), "status", "--porcelain"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -319,7 +375,7 @@ class BoothLauncherApp:
         self._append_log("[更新] ローカル変更を一時退避します...")
         result = subprocess.run(
             [
-                "git",
+                *self.git_cmd,
                 "-C",
                 str(repo_dir),
                 "stash",
@@ -351,7 +407,7 @@ class BoothLauncherApp:
     def _get_pending_updates(self, repo_dir: Path) -> tuple[int, list[str]]:
         count_result = subprocess.run(
             [
-                "git",
+                *self.git_cmd,
                 "-C",
                 str(repo_dir),
                 "rev-list",
@@ -376,7 +432,7 @@ class BoothLauncherApp:
 
         log_result = subprocess.run(
             [
-                "git",
+                *self.git_cmd,
                 "-C",
                 str(repo_dir),
                 "log",
@@ -534,6 +590,23 @@ class BoothLauncherApp:
         for candidate in PYTHON_CANDIDATES:
             if BoothLauncherApp._command_available(candidate + ["--version"]):
                 return candidate
+        return None
+
+    @staticmethod
+    def _find_git_command() -> list[str] | None:
+        """
+        git を探す: PATH → 既知のインストール先 (Git for Windows / scoop / chocolatey)。
+
+        インストール直後は PATH が反映されていないことがあるため,
+        見つけた実行ファイルの絶対パスをそのまま使う。
+        """
+        found = shutil.which("git")
+        if found:
+            return [found]
+        for template in GIT_PATH_CANDIDATES:
+            expanded = os.path.expandvars(template)
+            if os.path.isfile(expanded):
+                return [expanded]
         return None
 
     @staticmethod
