@@ -190,6 +190,10 @@ For class definitions, hotkeys, migration details, and GUI usage, see [`fish_tra
 
 If you use the EXE build, download the patch zip, extract it next to the EXE, and make sure a `patch/` folder is created. The program will load the patch automatically on startup.
 
+> **Only the newest patch needs to be installed.** Every patch contains the complete program code, so the latest one supersedes all older patches — there is no need to install them one by one. The patch is published as `VRC.auto.fish.patch.<version>.zip`; after installing, check the version in the window title to confirm it took effect.
+>
+> Launcher users do not need to install patches manually: the launcher updates the `main` branch directly.
+
 The release asset is a single universal package. If a usable NVIDIA CUDA environment is detected, the app will prefer GPU execution; otherwise it will automatically fall back to CPU without requiring a separate download.
 
 ## GitHub Actions

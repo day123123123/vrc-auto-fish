@@ -168,6 +168,10 @@ class AppSettingsStore:
             data["HOLD_MIN_S"] = self.app.PARAM_DEFAULTS["HOLD_MIN_S"]
         if data.get("ANTI_STUCK_MODE") == "crouch":
             data["ANTI_STUCK_MODE"] = "jump"
+        # 手写的 settings.json 里可能写成 off/disable 等, 统一成 "none"
+        if str(data.get("ANTI_STUCK_MODE", "")).strip().lower() in (
+                "off", "disable", "disabled", "false", "no", "关闭"):
+            data["ANTI_STUCK_MODE"] = "none"
 
     @staticmethod
     def set_config_attr(attr: str, value):
@@ -259,7 +263,7 @@ class AppSettingsStore:
             return True
 
         if attr == "ANTI_STUCK_MODE":
-            if val in ("shake", "jump"):
+            if val in ("shake", "jump", "none"):
                 self.apply_choice_setting("ANTI_STUCK_MODE", val)
                 if hasattr(self.app, "var_anti_mode"):
                     self.app.var_anti_mode.set(val)

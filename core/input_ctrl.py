@@ -8,6 +8,12 @@
    代价: 需要 VRChat 处于前台窗口, 且会占用真实光标 (脚本会把光标停在游戏窗口中心,
    停止后还原到接管前的位置)。
 
+   ★ 光标搬移必须"静默"且发生在抢前台之前:
+     - VRChat 桌面模式的鼠标视角会把光标位移当成鼠标移动, 一次跨屏搬移会被算成
+       约 180° 的大甩视角 (26100301 首次 F9 的反馈);
+     - 静默 = 只用 SetCursorPos (不产生 raw input 事件), 不用 SendInput 绝对移动;
+     - 顺序 = 先搬光标再抢前台: 窗口不在前台时收不到 raw input, 位移不会被消费。
+
 2. **postmessage** — 旧版后台消息投递, 不移动光标不抢焦点 (旧版本 VRChat 可用)。
 
 安全设计: sendinput 模式下, 如果无法确认 VRChat 已在前台, **不注入任何事件**,
@@ -225,16 +231,36 @@ class InputController:
             user32.GetSystemMetrics(SM_CYVIRTUALSCREEN),
         )
 
+    def _quiet_cursor_move(self) -> bool:
+        """是否使用静默搬移 (SetCursorPos) 而不是 SendInput 绝对移动。"""
+        return bool(getattr(config, "INPUT_QUIET_CURSOR_MOVE", True))
+
     def _move_cursor(self, x: int, y: int) -> bool:
-        """把真实光标移到屏幕坐标 (x, y)。"""
+        """
+        把真实光标搬到屏幕坐标 (x, y) — 静默优先。
+
+        默认用 SetCursorPos: 它只更新光标位置, 不产生 raw input 事件, 因此不会被
+        VRChat 的鼠标视角当成鼠标位移 (SendInput 绝对移动会被当成位移 → 甩视角)。
+        只有在 SetCursorPos 失败时才退回到 SendInput 绝对移动。
+        """
+        x, y = int(x), int(y)
+        if self._quiet_cursor_move():
+            try:
+                if user32.SetCursorPos(x, y):
+                    return True
+            except Exception:
+                pass
+        # 退路: SendInput 绝对移动 (会产生 raw input 位移, 可能被游戏算成视角转动)
         vx, vy, vw, vh = self._virtual_desktop()
         ok = self._send_mouse(
             MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
             _to_abs(x, vx, vw), _to_abs(y, vy, vh),
         )
         if not ok:
-            # 退路: 直接设置光标位置 (同样会移动真实光标)
-            user32.SetCursorPos(int(x), int(y))
+            try:
+                user32.SetCursorPos(x, y)
+            except Exception:
+                pass
         return ok
 
     def _cursor_pos(self):
@@ -349,17 +375,40 @@ class InputController:
         if pos is not None:
             self._saved_cursor = pos
 
+    def _park_cursor(self):
+        """
+        必要时把光标静默搬进游戏窗口 (已经在窗口内就一点都不搬)。
+
+        搬移动静默进行, 且调用方必须保证在抢前台之前调用它, 否则游戏会把这
+        段位移当成鼠标移动 (见模块开头的说明)。
+        """
+        if not self._client_rect:
+            return
+        if self._cursor_in_game():
+            return
+        self._remember_cursor()
+        self._move_cursor(self._screen_x, self._screen_y)
+        self._cursor_owned = True
+
     def _prepare_sendinput(self) -> bool:
-        """注入前准备: 窗口区域 + 前台 + 光标就位。任一失败都不注入。"""
+        """注入前准备: 窗口区域 + 光标就位 + 前台。任一失败都不注入。"""
         if not self._update_click_pos():
             log.warning_t("input.noWindowRegion")
             return False
+
+        # ★ 顺序关键: 先搬光标, 再抢前台。
+        #   窗口不在前台时收不到 raw input, 这段位移不会被鼠标视角消费,
+        #   因此不会出现"首次启动甩视角"的问题。
+        self._park_cursor()
+
         if not self._ensure_foreground():
             return False
-        if not self._cursor_in_game():
-            self._remember_cursor()
-            self._move_cursor(self._screen_x, self._screen_y)
-            self._cursor_owned = True
+
+        # 抢前台可能把窗口从最小化恢复出来 (位置会变), 重新取一次区域;
+        # 若光标仍不在窗口内, 再静默补搬一次。
+        self._update_click_pos()
+        self._park_cursor()
+
         if not self._cursor_over_game():
             return False          # 遮挡警告已在 _cursor_over_game 内记录
         self._cover_warned = False
@@ -387,13 +436,12 @@ class InputController:
         return ok
 
     def move_to_game_center(self):
-        """把点击目标设在游戏窗口中心 (SendInput 下同时移动真实光标)。"""
+        """把点击目标设在游戏窗口中心 (光标不在窗口内时才静默搬动)。"""
         if not self._update_click_pos():
             return
-        if self.use_sendinput and self._ensure_foreground():
-            self._remember_cursor()
-            self._move_cursor(self._screen_x, self._screen_y)
-            self._cursor_owned = True
+        if not self.use_sendinput:
+            return
+        self._park_cursor()
 
     def ensure_cursor_in_game(self):
         """确保光标停在游戏窗口内 (SendInput 后才需要)。"""

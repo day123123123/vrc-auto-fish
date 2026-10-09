@@ -43,6 +43,9 @@ class FakeUser32:
         self.cursor = cursor
         self.under = under           # WindowFromPoint 返回值 (None = 游戏窗口)
         self.mouse_events = []       # [(dx, dy, flags)]
+        self.set_cursor_calls = []   # [(x, y)]
+        self.log = []                # 有序事件流, 用于断言调用顺序
+        self.set_cursor_result = 1
         self.key_events = 0
         self.posted = []
         self.send_result = 1
@@ -56,6 +59,7 @@ class FakeUser32:
         if inp.type == INPUT_MOUSE:
             flags = inp.mi.dwFlags
             self.mouse_events.append((inp.mi.dx, inp.mi.dy, flags))
+            self.log.append(("sendinput", flags))
             if flags & MOUSEEVENTF_MOVE:
                 self.cursor = (
                     round(inp.mi.dx / ABS_MAX * (VW - 1)) + VX,
@@ -76,8 +80,11 @@ class FakeUser32:
         return 1
 
     def SetCursorPos(self, x, y):
-        self.cursor = (int(x), int(y))
-        return 1
+        self.set_cursor_calls.append((int(x), int(y)))
+        self.log.append(("setcursorpos", (int(x), int(y))))
+        if self.set_cursor_result:
+            self.cursor = (int(x), int(y))
+        return self.set_cursor_result
 
     def GetSystemMetrics(self, index):
         return {76: VX, 77: VY, 78: VW, 79: VH}[index]
@@ -96,6 +103,7 @@ class FakeUser32:
         return 1
 
     def SetForegroundWindow(self, hwnd):
+        self.log.append(("setforeground", hwnd))
         if self.allow_foreground:
             self.foreground = hwnd
         return self.allow_foreground
@@ -109,6 +117,13 @@ class FakeUser32:
             (dx, dy) for dx, dy, flags in self.mouse_events
             if flags & MOUSEEVENTF_MOVE
         ]
+
+    def index_of(self, kind):
+        """log 中某类事件第一次出现的下标; 不存在返回 -1。"""
+        for i, entry in enumerate(self.log):
+            if entry[0] == kind:
+                return i
+        return -1
 
 
 class FakeWindowManager:
@@ -139,16 +154,19 @@ class InputControllerSendInputTests(unittest.TestCase):
         self._old_delay = getattr(config, "INPUT_FOCUS_DELAY", 0.08)
         self._old_restore = getattr(config, "INPUT_RESTORE_CURSOR", True)
         self._old_hold = getattr(config, "INPUT_CLICK_HOLD_S", 0.06)
+        self._old_quiet = getattr(config, "INPUT_QUIET_CURSOR_MOVE", True)
         config.INPUT_MODE = "sendinput"
         config.INPUT_FOCUS_DELAY = 0.0
         config.INPUT_RESTORE_CURSOR = True
         config.INPUT_CLICK_HOLD_S = 0.0
+        config.INPUT_QUIET_CURSOR_MOVE = True
 
     def tearDown(self):
         config.INPUT_MODE = self._old_mode
         config.INPUT_FOCUS_DELAY = self._old_delay
         config.INPUT_RESTORE_CURSOR = self._old_restore
         config.INPUT_CLICK_HOLD_S = self._old_hold
+        config.INPUT_QUIET_CURSOR_MOVE = self._old_quiet
 
     def make(self, cursor=(0, 0), foreground=123, focus_result=True, under=None):
         fake = FakeUser32(foreground=foreground, cursor=cursor, under=under)
@@ -182,29 +200,39 @@ class InputControllerSendInputTests(unittest.TestCase):
 
     # ── SendInput 点击 ──
 
-    def test_click_moves_cursor_then_left_down_up(self):
+    def test_click_parks_cursor_quietly_then_left_down_up(self):
         controller, fake, _ = self.make(cursor=(10, 10))
         controller.click()
 
+        # 静默搬移: 只用 SetCursorPos, 不发任何 SendInput 移动事件
+        self.assertEqual(fake.moves(), [])
+        self.assertEqual(fake.set_cursor_calls, [TARGET])
         self.assertEqual(
-            fake.flags(),
-            [
-                MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
-                MOUSEEVENTF_LEFTDOWN,
-                MOUSEEVENTF_LEFTUP,
-            ],
+            fake.flags(), [MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP]
         )
-        self.assertEqual(
-            fake.moves()[0],
-            (_screen_to_abs(TARGET[0], VX, VW), _screen_to_abs(TARGET[1], VY, VH)),
-        )
-        # 归一化往返后光标应落在窗口中心 (假 user32 会把绝对坐标还原成屏幕坐标)
         self.assertEqual(fake.cursor, TARGET)
         self.assertFalse(controller.mouse_is_down)
+
+    def test_cursor_is_parked_before_the_game_is_focused(self):
+        """
+        回归测试: 必须先搬光标再抢前台。
+
+        窗口不在前台时收不到 raw input, 位移才不会被鼠标视角消费 (180° 甩视角 bug)。
+        """
+        controller, fake, _ = self.make(
+            cursor=(10, 10), foreground=999, focus_result=False)
+        controller.click()
+
+        park = fake.index_of("setcursorpos")
+        focus = fake.index_of("setforeground")
+        self.assertGreaterEqual(park, 0, "没有搬移光标")
+        self.assertGreaterEqual(focus, 0, "没有尝试抢前台")
+        self.assertLess(park, focus, "搬光标必须发生在抢前台之前")
 
     def test_cursor_already_inside_game_is_not_moved(self):
         controller, fake, _ = self.make(cursor=TARGET)
         controller.click()
+        self.assertEqual(fake.set_cursor_calls, [])
         self.assertEqual(fake.moves(), [])
         self.assertEqual(
             fake.flags(), [MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP]
@@ -216,9 +244,31 @@ class InputControllerSendInputTests(unittest.TestCase):
             controller.mouse_down()
             controller.mouse_up()
 
-        self.assertEqual(len(fake.moves()), 1)
+        self.assertEqual(len(fake.set_cursor_calls), 1)
+        self.assertEqual(fake.moves(), [])
         self.assertEqual(fake.flags().count(MOUSEEVENTF_LEFTDOWN), 3)
         self.assertEqual(fake.flags().count(MOUSEEVENTF_LEFTUP), 3)
+
+    def test_quiet_move_can_be_disabled_for_old_behaviour(self):
+        config.INPUT_QUIET_CURSOR_MOVE = False
+        controller, fake, _ = self.make(cursor=(10, 10))
+        controller.click()
+
+        self.assertEqual(
+            fake.moves(),
+            [(_screen_to_abs(TARGET[0], VX, VW), _screen_to_abs(TARGET[1], VY, VH))],
+        )
+        self.assertEqual(fake.set_cursor_calls, [])
+
+    def test_set_cursor_pos_failure_falls_back_to_send_input(self):
+        controller, fake, _ = self.make(cursor=(10, 10))
+        fake.set_cursor_result = 0
+        controller.click()
+
+        self.assertEqual(len(fake.set_cursor_calls), 1)
+        self.assertEqual(len(fake.moves()), 1)
+        self.assertIn(MOUSEEVENTF_LEFTDOWN, fake.flags())
+        self.assertIn(MOUSEEVENTF_LEFTUP, fake.flags())
 
     def test_mouse_down_is_idempotent_while_held(self):
         controller, fake, _ = self.make(cursor=TARGET)
@@ -297,10 +347,12 @@ class InputControllerSendInputTests(unittest.TestCase):
 
         controller.restore_cursor()
         self.assertEqual(fake.cursor, (10, 10))
+        # 还原同样是静默的 (不发 SendInput 移动)
+        self.assertEqual(fake.moves(), [])
         # 二次调用不会再次移动
-        fake.mouse_events.clear()
+        fake.set_cursor_calls.clear()
         controller.restore_cursor()
-        self.assertEqual(fake.mouse_events, [])
+        self.assertEqual(fake.set_cursor_calls, [])
 
     def test_restore_cursor_respects_config_switch(self):
         config.INPUT_RESTORE_CURSOR = False

@@ -66,6 +66,10 @@ INPUT_MODE           = "sendinput"
 INPUT_FOCUS_DELAY    = 0.08       # 切前台后等待游戏激活的缓冲 (秒)
 INPUT_CLICK_HOLD_S   = 0.06       # click() 的按下时长 (秒)
 INPUT_RESTORE_CURSOR = True       # True=停止钓鱼后把光标还原到接管前的位置
+# ★ True = 用 SetCursorPos 静默搬移光标 (不产生 raw input 事件)
+#        VRChat 桌面模式的鼠标视角不会把静默搬移算成鼠标移动, 避免大幅甩视角
+#   False = 旧行为: SendInput 绝对移动 (跨屏搬移会被算成约 180° 的视角转动)
+INPUT_QUIET_CURSOR_MOVE = True
 
 # ═══════════════════════════════════════════════════════════
 #  快捷键 (VRChat 内也可用)
@@ -99,7 +103,7 @@ SHAKE_HEAD_TIME     = 0.02        # 摇头每段按住时长(秒)
 INITIAL_PRESS_TIME  = 0.2         # 开局按压时长(秒)
 SUCCESS_PROGRESS    = 0.55        # 进度条 > 此值判定钓鱼成功 (0~1)
 SKIP_SUCCESS_CHECK  = True        # True=不检查成功/失败,总是点击收杆
-ANTI_STUCK_MODE     = "jump"      # "shake"=摇头防卡杆, "jump"=跳跃防卡杆
+ANTI_STUCK_MODE     = "jump"      # "shake"=摇头, "jump"=跳跃, "none"=关闭 (既不摇头也不跳跃)
 MINIGAME_TIMEOUT    = 120.0       # 小游戏最长持续时间 (秒), 超过强制结束
 UI_CHECK_FRAMES     = 30           # 每N帧检查一次轨道是否还在 (15→30, 降低检查频率)
 UI_GONE_LIMIT       = 4            # 连续N次轨道检查失败 → 判定游戏结束 (2→4)

@@ -138,7 +138,7 @@ PERSISTED_CONFIG_ATTRS = (
 class FishingApp:
     """VRChat 自动钓鱼 — 主窗口"""
 
-    APP_VERSION = "26100301"
+    APP_VERSION = "26100302"
 
     PARAM_DEFAULTS = PARAM_DEFAULTS
     SETTINGS_DEFAULTS = SETTINGS_DEFAULTS
@@ -336,6 +336,12 @@ class FishingApp:
                                   command=self._on_anti_mode_change)
         rb_jump.pack(side="left", padx=4)
         self._create_tooltip(rb_jump, self.tr("anti.tooltip.jump"))
+
+        rb_none = ttk.Radiobutton(row_anti, text=self.tr("anti.mode.none"),
+                                  variable=self.var_anti_mode, value="none",
+                                  command=self._on_anti_mode_change)
+        rb_none.pack(side="left", padx=4)
+        self._create_tooltip(rb_none, self.tr("anti.tooltip.none"))
 
         ttk.Label(row_anti, text=self.tr("anti.label.shakeTime")).pack(side="left", padx=(12, 2))
         self.var_shake_time = tk.StringVar(
@@ -738,6 +744,7 @@ class FishingApp:
         labels = {
             "shake": self.tr("anti.mode.shake"),
             "jump": self.tr("anti.mode.jump"),
+            "none": self.tr("anti.mode.none"),
         }
         self._apply_choice_setting(
             "ANTI_STUCK_MODE",

@@ -247,13 +247,16 @@ class FishingBot:
             self.input.click()
             if self._wait_with_minigame_preempt(0.15, "🎣 抛竿后摇杆等待"):
                 return True
-            mode = getattr(config, "ANTI_STUCK_MODE", "jump")
-            if mode == "jump":
-                log.info_t("bot.log.castJump")
-                self.input.jump_toggle()
-            else:
+            mode = str(getattr(config, "ANTI_STUCK_MODE", "jump")).strip().lower()
+            if mode in ("none", "off"):
+                # 防卡杆关闭: 既不跳跃也不摇头
+                log.info_t("bot.log.castNoAntiStuck")
+            elif mode == "shake":
                 log.info_t("bot.log.castShake")
                 self.input.shake_head()
+            else:
+                log.info_t("bot.log.castJump")
+                self.input.jump_toggle()
         # ★ 从抛竿开始就显示 debug 窗口
         try:
             screen = self._grab()
