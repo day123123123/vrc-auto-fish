@@ -42,6 +42,9 @@ if errorlevel 1 (
 :: ============================================
 ::  Launch
 :: ============================================
+echo [INFO] Starting VRC Auto Fish...
+echo        First launch can take 10-30 seconds while torch / YOLO load, please wait.
+echo.
 python main.py
 if errorlevel 1 pause
 exit /b 0

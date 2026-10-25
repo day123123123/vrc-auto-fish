@@ -1,0 +1,8 @@
+# 统一的换行符规则
+# .bat / .cmd 必须用 CRLF: cmd.exe 解析 ( ) 括号块和 call :label 时依赖 CRLF,
+# 用 LF 会把行切碎, 报一堆 "'xxx' 不是内部或外部命令, 也不是可运行的程序或批处理文件"。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# PowerShell 脚本同样用 CRLF 更稳
+*.ps1 text eol=crlf

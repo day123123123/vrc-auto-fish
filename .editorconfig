@@ -10,3 +10,8 @@ trim_trailing_whitespace = true
 
 [*.md]
 trim_trailing_whitespace = false
+
+# ★ batch 文件必须用 CRLF: cmd.exe 用 LF 解析 ( ) 括号块时会报
+#   "'xxx' 不是内部或外部命令, 也不是可运行的程序或批处理文件", 然后窗口直接关闭
+[*.{bat,cmd}]
+end_of_line = crlf
