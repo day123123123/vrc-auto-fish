@@ -78,6 +78,7 @@ PARAM_GROUPS = [
         [
             ("params.VERIFY_FRAMES.label", "VERIFY_FRAMES", "int", "params.VERIFY_FRAMES.tip"),
             ("params.SUCCESS_PROGRESS.label", "SUCCESS_PROGRESS", "pct", "params.SUCCESS_PROGRESS.tip"),
+            ("params.CAST_DELAY.label", "CAST_DELAY", "float", "params.CAST_DELAY.tip"),
         ],
     ),
 ]
@@ -89,6 +90,7 @@ TUNABLE_PARAMS = [
 ]
 
 PARAM_DEFAULTS = {
+    "CAST_DELAY": 1.5,
     "BITE_FORCE_HOOK": 18.0,
     "FISH_GAME_SIZE": 20,
     "DEAD_ZONE": 15,

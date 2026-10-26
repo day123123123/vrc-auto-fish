@@ -204,12 +204,32 @@ def label_loop(file_pairs, save_func, mode_name):
 
 
 def build_parser():
-    return build_label_parser("多颜色鱼标注工具")
+    parser = build_label_parser("多颜色鱼标注工具")
+    parser.add_argument("--base-dir", type=str, default="", help="数据目录（可选，默认使用配置路径）")
+    return parser
 
 
 def main(argv=None):
+    global TRAIN_IMG, TRAIN_LBL, UNLABELED, VAL_IMG, VAL_LBL
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    # 如果提供了自定义数据目录，更新全局路径
+    if args.base_dir:
+        import fish_trainer.paths
+        base_dir = os.path.abspath(args.base_dir)
+        fish_trainer.paths.BASE = base_dir
+        fish_trainer.paths.UNLABELED = os.path.join(base_dir, "images", "unlabeled")
+        fish_trainer.paths.TRAIN_IMG = os.path.join(base_dir, "images", "train")
+        fish_trainer.paths.TRAIN_LBL = os.path.join(base_dir, "labels", "train")
+        fish_trainer.paths.VAL_IMG = os.path.join(base_dir, "images", "val")
+        fish_trainer.paths.VAL_LBL = os.path.join(base_dir, "labels", "val")
+        # 更新本模块中的全局变量
+        TRAIN_IMG = fish_trainer.paths.TRAIN_IMG
+        TRAIN_LBL = fish_trainer.paths.TRAIN_LBL
+        UNLABELED = fish_trainer.paths.UNLABELED
+        VAL_IMG = fish_trainer.paths.VAL_IMG
+        VAL_LBL = fish_trainer.paths.VAL_LBL
 
     ensure_dataset_dirs()
     if args.relabel:

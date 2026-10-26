@@ -16,7 +16,6 @@ import cv2
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
-from core.yolo_detector import YoloDetector
 from yolo.classes import (
     CLASS_COLORS,
     CLASS_NAMES,
@@ -26,7 +25,8 @@ from yolo.classes import (
     OVERLAY_NAMES,
 )
 from yolo.console import safe_print
-from yolo.paths import TRAIN_IMG, TRAIN_LBL, UNLABELED, VAL_IMG, VAL_LBL, ensure_dataset_dirs
+import yolo.paths
+from yolo.paths import ensure_dataset_dirs
 from trainer_common.labeling import (
     build_label_parser,
     list_relabel_entries,
@@ -35,6 +35,13 @@ from trainer_common.labeling import (
     save_new_labeled_entry,
     write_yolo_labels,
 )
+
+# 使用模块引用以支持动态路径更新
+TRAIN_IMG = yolo.paths.TRAIN_IMG
+TRAIN_LBL = yolo.paths.TRAIN_LBL
+UNLABELED = yolo.paths.UNLABELED
+VAL_IMG = yolo.paths.VAL_IMG
+VAL_LBL = yolo.paths.VAL_LBL
 
 drawing = False
 ix = iy = 0
@@ -51,13 +58,14 @@ CLASS_NAME_TO_ID = {name: cls_id for cls_id, name in CLASS_NAMES.items()}
 BOX_MOVE_STEP = 2
 BOX_RESIZE_STEP = 0.05
 KEY_CTRL_D = 4
+KEY_BACKSPACE = 8
 
 
 def short_help():
     return (
         "[F]=black [1-9,0]=fish colors [?]=question [B]=bar [T]=track [P]=progress [K]=hook "
-        "[A]=auto [RClick]=cycle-hit [[/]]=box-/+ [,/.;']=move [J]=prev-image [N/M]=prev/next-class "
-        "[Z]=undo [X]=clear [Ctrl+D]=delete [H]=help [S]=save [D]=skip [Q]=quit"
+        "[A]=auto [RClick]=cycle-hit [[/]]=box-/+ [,/.;']=move [-/J]=prev [=/D]=skip/next "
+        "[Z]=undo [X]=clear [BS]=del-box [Ctrl+D]=delete [H]=help [S]=save [Q]=quit"
     )
 
 
@@ -76,11 +84,13 @@ def print_help():
     safe_print("  选中框后左键重新拉框: 直接覆盖这个框")
     safe_print("  [[ / ]] 缩小/放大选中框")
     safe_print("  [,/.;'] 上下左右微调选中框")
-    safe_print("  [J] 回到上一张图片")
+    safe_print("  [- / J] 回到上一张图片")
+    safe_print("  [= / D] 跳过当前图片到下一张")
     safe_print("  [N]/[M] 下一个/上一个类别")
     safe_print("  [Z] 撤销  [X] 清空当前图片标注")
+    safe_print("  [Backspace] 删除当前选中的标注框")
     safe_print("  [Ctrl+D] 删除当前图片文件并跳到下一张")
-    safe_print("  [S]/[Enter] 保存  [D] 跳过  [Q]/[Esc] 退出")
+    safe_print("  [S]/[Enter] 保存  [Q]/[Esc] 退出")
     safe_print("=" * 72)
 
 
@@ -94,32 +104,31 @@ def normalize_class_name(class_name):
 
 
 def resolve_predict_device(device_name):
-    normalized = YoloDetector.normalize_device_preference(device_name)
-    if normalized == "ncnn":
-        return YoloDetector.select_ncnn_runtime_device()[0]
-    _backend, runtime_device, _label = YoloDetector.select_runtime_device(
-        normalized,
-        YoloDetector.cuda_available(),
-        ncnn_available=YoloDetector.ncnn_available(),
-    )
-    return runtime_device
+    normalized = config.normalize_yolo_device(device_name)
+    if normalized == "cuda":
+        return 0
+    if normalized != "auto":
+        return normalized
+    try:
+        import torch
+        return 0 if torch.cuda.is_available() else "cpu"
+    except Exception:
+        return "cpu"
 
 
 class AutoLabeler:
     def __init__(self, model_path, conf=0.25, device="auto", one_per_class=True):
-        normalized_device = YoloDetector.normalize_device_preference(device)
-        ncnn_model_path = YoloDetector.resolve_ncnn_model_path(model_path)
-        if not os.path.exists(model_path) and not (
-            normalized_device == "ncnn" and os.path.isdir(ncnn_model_path)
-        ):
+        try:
+            from ultralytics import YOLO
+        except ImportError as exc:
+            raise RuntimeError("缺少 ultralytics，无法启用自动打标") from exc
+
+        if not os.path.exists(model_path):
             raise FileNotFoundError(f"自动打标模型不存在: {model_path}")
 
-        runtime = YoloDetector.build_runtime(model_path, device=device)
-        self.model = runtime["model"]
+        self.model = YOLO(model_path)
         self.conf = conf
-        self.device = runtime["runtime_device"]
-        self.device_label = runtime["device_label"]
-        self.backend_label = runtime["backend_label"]
+        self.device = resolve_predict_device(device)
         self.one_per_class = one_per_class
 
     def predict_boxes(self, img):
@@ -535,6 +544,14 @@ def label_loop(file_pairs, save_func, mode_name):
                 safe_print("    已清空当前图片全部标注")
                 draw_overlay()
                 cv2.imshow("YOLO Label Tool", img_display)
+            elif key == KEY_BACKSPACE:
+                if selected_box_idx >= 0 and selected_box_idx < len(boxes):
+                    removed = boxes.pop(selected_box_idx)
+                    reset_hit_selection_cycle()
+                    set_selected_box(-1)
+                    safe_print(f"    删除选中框: {DISPLAY_NAMES.get(removed[0], '?')}")
+                    draw_overlay()
+                    cv2.imshow("YOLO Label Tool", img_display)
             elif key in (ord("h"), ord("H")):
                 print_help()
             elif key in (ord("a"), ord("A")):
@@ -568,14 +585,14 @@ def label_loop(file_pairs, save_func, mode_name):
                     safe_print("    [跳过] 没有标注框")
                     break
                 break
-            elif key in (ord("d"), ord("D")):
+            elif key in (ord("d"), ord("D"), ord("=")):
                 stash_current_boxes(img_path, draft_boxes)
                 safe_print("    [跳过] 此图不修改")
                 break
             elif key == KEY_CTRL_D:
                 safe_print("    [删除] 当前图片将被删除并跳到下一张")
                 break
-            elif key in (ord("j"), ord("J")):
+            elif key in (ord("j"), ord("J"), ord("-")):
                 stash_current_boxes(img_path, draft_boxes)
                 if idx == 0:
                     safe_print("    [提示] 已经是第一张")
@@ -594,7 +611,7 @@ def label_loop(file_pairs, save_func, mode_name):
             labeled += 1
             safe_print(f"    [保存] {len(boxes)} 个框")
             idx = next_index(idx)
-        elif key in (ord("d"), ord("D")):
+        elif key in (ord("d"), ord("D"), ord("=")):
             idx = next_index(idx)
         elif key == KEY_CTRL_D:
             remove_draft(img_path, draft_boxes)
@@ -602,7 +619,7 @@ def label_loop(file_pairs, save_func, mode_name):
             file_pairs.pop(idx)
             if idx >= len(file_pairs):
                 idx = len(file_pairs) - 1
-        elif key in (ord("j"), ord("J")):
+        elif key in (ord("j"), ord("J"), ord("-")):
             idx = previous_index(idx)
 
     cv2.destroyAllWindows()
@@ -611,6 +628,7 @@ def label_loop(file_pairs, save_func, mode_name):
 
 def build_parser():
     parser = build_label_parser("YOLO 多颜色鱼标注工具")
+    parser.add_argument("--base-dir", type=str, default="", help="数据目录（可选，默认使用配置路径）")
     parser.add_argument("--predict-model", type=str, default="", help="自动打标模型路径")
     parser.add_argument("--predict-conf", type=float, default=0.25, help="自动打标置信度阈值")
     parser.add_argument("--predict-device", type=str, default="auto", help="自动打标设备，如 auto/cpu/cuda")
@@ -620,11 +638,30 @@ def build_parser():
 
 
 def main(argv=None):
-    global auto_labeler, auto_predict_enabled
+    global auto_labeler, auto_predict_enabled, TRAIN_IMG, TRAIN_LBL, UNLABELED, VAL_IMG, VAL_LBL
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    ensure_dataset_dirs()
+    # 如果提供了自定义数据目录，更新 yolo.paths 中的全局路径
+    if args.base_dir:
+        base_dir = os.path.abspath(args.base_dir)
+        yolo.paths.BASE = base_dir
+        yolo.paths.UNLABELED = os.path.join(base_dir, "images", "unlabeled")
+        yolo.paths.TRAIN_IMG = os.path.join(base_dir, "images", "train")
+        yolo.paths.TRAIN_LBL = os.path.join(base_dir, "labels", "train")
+        yolo.paths.VAL_IMG = os.path.join(base_dir, "images", "val")
+        yolo.paths.VAL_LBL = os.path.join(base_dir, "labels", "val")
+        # 更新本模块中的全局变量
+        TRAIN_IMG = yolo.paths.TRAIN_IMG
+        TRAIN_LBL = yolo.paths.TRAIN_LBL
+        UNLABELED = yolo.paths.UNLABELED
+        VAL_IMG = yolo.paths.VAL_IMG
+        VAL_LBL = yolo.paths.VAL_LBL
+
+    # 创建所需的目录
+    for dir_path in [UNLABELED, TRAIN_IMG, TRAIN_LBL, VAL_IMG, VAL_LBL]:
+        os.makedirs(dir_path, exist_ok=True)
+    
     auto_predict_enabled = bool(args.auto_predict)
 
     if args.predict_model:

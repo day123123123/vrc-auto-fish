@@ -11,17 +11,44 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fish_trainer.console import safe_print
 from trainer_common.collect import run_collect
-from trainer_common.profiles import get_profile
+from trainer_common.profiles import get_profile, CustomPathProfile
 
 
 def build_parser():
     from trainer_common.collect import build_parser
-
-    return build_parser(get_profile("multicolor"))
+    parser = build_parser(get_profile("multicolor"))
+    # 添加 --base-dir 参数支持
+    parser.add_argument("--base-dir", type=str, default="", help="数据目录（可选，默认使用配置路径）")
+    return parser
 
 
 def main(argv=None):
-    run_collect(get_profile("multicolor"), safe_print, argv=argv)
+    import argparse
+    parser = build_parser()
+    args, remaining = parser.parse_known_args(argv)
+    
+    profile = get_profile("multicolor")
+    
+    # 如果提供了自定义数据目录，创建自定义 profile
+    if args.base_dir:
+        base_dir = os.path.abspath(args.base_dir)
+        profile = CustomPathProfile(profile, custom_dataset_root=base_dir)
+    
+    # 构建过滤后的 argv（移除 --base-dir 参数），用于 trainer_common.collect
+    new_argv = []
+    skip_next = False
+    for arg in (argv or []):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--base-dir":
+            skip_next = True
+            continue
+        if arg.startswith("--base-dir="):
+            continue
+        new_argv.append(arg)
+    
+    run_collect(profile, safe_print, argv=new_argv)
 
 
 if __name__ == "__main__":
